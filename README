@@ -1,0 +1,21 @@
+rockyTlsTester by Marco Bellaccini - marco.bellaccini[at!]gmail.com
+rockyTlsTester is a simple program that tests a server for TLS Cipher Suites support.
+It just sends TLS ClientHello messages, and, by looking at server's reply (if any), determines whether the selected Cipher Suite(s) is supported or not.
+rockyTlsTester builds TLS messages in a "byte-by-byte" fashion and so does not need any tls library (that's it: no OpenSSL, no GnuTLS, no libNSS).
+The program supports both single Cipher Suite support check and a full-scan mode (in which it checks for support of all the known cipher suites in the IANA list).
+
+Here follows some usage examples.
+
+List all Cipher Suites supported by www.google.com (https, tcp port 443):
+rockyTlsTester -F www.google.com
+
+Tests if www.google.com (https, tcp port 443) supports cipher suite TLS_RSA_WITH_AES_128_CBC_SHA:
+rockyTlsTester -c TLS_RSA_WITH_AES_128_CBC_SHA www.google.com
+
+List all Cipher Suites supported by Active Directory Domain Controller 10.0.0.5 with LDAP over ssl/tls (ldaps, tcp port 636):
+rockyTlsTester -F -p 636 10.0.0.5
+
+For more help about possible options, try:
+rockyTlsTester --help
+
+

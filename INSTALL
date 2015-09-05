@@ -1,0 +1,17 @@
+Installation Instructions
+*************************
+
+Here is how to perform a minimal installation with default options.
+
+Compile the program by typing:
+
+./configure
+make
+
+then, to install the program, type (as root):
+
+make install
+
+After installing, if you don't like the program, you can type (as root):
+
+make uninstall
