@@ -68,7 +68,7 @@ FILE *CS_file; // IANA Cipher Suites List
 arguments.truetime=0;
 arguments.port=443;
 arguments.printMessage=0;
-arguments.CS_file="/usr/local/share/rockytlstester/tls-parameters-4.csv";
+arguments.CS_file="/usr/local/share/tlsprobe/tls-parameters-4.csv";
 arguments.cipherSuite="TLS_RSA_WITH_AES_128_CBC_SHA";
 arguments.fullScanMode=0;
 arguments.cipherSuiteMode=0;
@@ -98,13 +98,13 @@ if ( 0==strcmp(arguments.tlsVer, "1.0") ) {
 /* Check for options compatibility */
 if (arguments.fullScanMode && arguments.cipherSuiteMode) { // if user triggered both -F and -c options (something that doesn't make sense)
 	printf("Sorry, -c option is incompatible with -F\n");
-	printf("Try `rockyTlsTester --help' or `rockyTlsTester --usage' for more information.\n");
+	printf("Try `tlsprobe --help' or `tlsprobe --usage' for more information.\n");
 	exit(1);
 }
 if (!arguments.fullScanMode && !arguments.cipherSuiteMode) { // assure that one operation mode (-c or -F) was specified
 	printf("No operation mode was selected, aborting...\n");
 	printf("Please specify an operation mode (with -F or -c for example).\n");
-	printf("Try `rockyTlsTester --help' or `rockyTlsTester --usage' for more information.\n");
+	printf("Try `tlsprobe --help' or `tlsprobe --usage' for more information.\n");
 	exit(1);
 }
 
@@ -327,7 +327,7 @@ int createConnection(struct sockaddr_in sin, struct timeval timeoutS, struct tim
 	/* active open */
 
 	if ((s = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
-		perror("rockyTlsTester: socket");
+		perror("tlsprobe: socket");
 		return -1;
 	}
 

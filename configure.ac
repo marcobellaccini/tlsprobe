@@ -1,4 +1,4 @@
-AC_INIT([rockyTlsTester], [0.1], [marco.bellaccini!at!gmail.com])
+AC_INIT([tlsprobe], [0.1], [marco.bellaccini!at!gmail.com])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 AC_PROG_CC
 AC_CONFIG_HEADERS([config.h])

@@ -1,2 +1,2 @@
-bin_PROGRAMS = rockyTlsTester
-rockyTlsTester_SOURCES = main.c
+bin_PROGRAMS = tlsprobe
+tlsprobe_SOURCES = main.c

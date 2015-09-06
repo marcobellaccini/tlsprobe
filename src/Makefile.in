@@ -49,7 +49,7 @@ POST_INSTALL = :
 NORMAL_UNINSTALL = :
 PRE_UNINSTALL = :
 POST_UNINSTALL = :
-bin_PROGRAMS = rockyTlsTester$(EXEEXT)
+bin_PROGRAMS = tlsprobe$(EXEEXT)
 subdir = src
 DIST_COMMON = $(srcdir)/Makefile.am $(srcdir)/Makefile.in
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
@@ -62,9 +62,9 @@ CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 am__installdirs = "$(DESTDIR)$(bindir)"
 PROGRAMS = $(bin_PROGRAMS)
-am_rockyTlsTester_OBJECTS = main.$(OBJEXT)
-rockyTlsTester_OBJECTS = $(am_rockyTlsTester_OBJECTS)
-rockyTlsTester_LDADD = $(LDADD)
+am_tlsprobe_OBJECTS = main.$(OBJEXT)
+tlsprobe_OBJECTS = $(am_tlsprobe_OBJECTS)
+tlsprobe_LDADD = $(LDADD)
 DEFAULT_INCLUDES = -I.@am__isrc@ -I$(top_builddir)
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__depfiles_maybe = depfiles
@@ -73,8 +73,8 @@ COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
 	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
 CCLD = $(CC)
 LINK = $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@
-SOURCES = $(rockyTlsTester_SOURCES)
-DIST_SOURCES = $(rockyTlsTester_SOURCES)
+SOURCES = $(tlsprobe_SOURCES)
+DIST_SOURCES = $(tlsprobe_SOURCES)
 am__can_run_installinfo = \
   case $$AM_UPDATE_INFO_DIR in \
     n|no|NO) false;; \
@@ -166,7 +166,7 @@ target_alias = @target_alias@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-rockyTlsTester_SOURCES = main.c
+tlsprobe_SOURCES = main.c
 all: all-am
 
 .SUFFIXES:
@@ -241,9 +241,9 @@ uninstall-binPROGRAMS:
 
 clean-binPROGRAMS:
 	-test -z "$(bin_PROGRAMS)" || rm -f $(bin_PROGRAMS)
-rockyTlsTester$(EXEEXT): $(rockyTlsTester_OBJECTS) $(rockyTlsTester_DEPENDENCIES) $(EXTRA_rockyTlsTester_DEPENDENCIES) 
-	@rm -f rockyTlsTester$(EXEEXT)
-	$(LINK) $(rockyTlsTester_OBJECTS) $(rockyTlsTester_LDADD) $(LIBS)
+tlsprobe$(EXEEXT): $(tlsprobe_OBJECTS) $(tlsprobe_DEPENDENCIES) $(EXTRA_tlsprobe_DEPENDENCIES) 
+	@rm -f tlsprobe$(EXEEXT)
+	$(LINK) $(tlsprobe_OBJECTS) $(tlsprobe_LDADD) $(LIBS)
 
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)

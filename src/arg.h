@@ -15,13 +15,13 @@ limitations under the License. */
 #define ARGNUM 1
 
 const char *argp_program_version =
-  "rockyTlsTester 0.1";
+  "tlsprobe 0.1";
 const char *argp_program_bug_address =
   "<marco.bellaccini[at!]gmail.com>";
 
 /* Program documentation. */
 static char doc[] =
-  "rockyTlsTester -- a TLS tester utility";
+  "tlsprobe -- a TLS tester utility";
 
 /* A description of the arguments we accept. */
 static char args_doc[] = "host";
@@ -31,7 +31,7 @@ static struct argp_option options[] = {
   {"true-time",    'T', 0,      0,  "Insert real Unix timestamp in TLS messages instead of random data (see https://bugzilla.mozilla.org/show_bug.cgi?id=967923 for details)" },
   {"print-message",    'm', 0,      0,  "Print messages before sending them" },
   {"port",   'p', "PORT", 0, "Set destination port to TCP port PORT (default is tcp/443 - HTTPS)" },
-  {"cs-file",   'f', "FILE", 0, "Use IANA Cipher Suites List file FILE (default is tls-parameters-4.csv located in /usr/local/share/rockytlstester)" },
+  {"cs-file",   'f', "FILE", 0, "Use IANA Cipher Suites List file FILE (default is tls-parameters-4.csv located in /usr/local/share/tlsprobe)" },
   {"cipher-suite",   'c', "CIPHER_SUITE_ID", 0, "Cipher Suite probe MODE: test if server supports cipher suite CIPHER_SUITE_ID (e.g. TLS_RSA_WITH_AES_128_CBC_SHA)" },
   {"full-scan",   'F', 0, 0, "Full-scan MODE: test the server for support of all the cipher suites listed in the IANA Cipher Suites List file" },
   {"timeout",   't', "TIMEOUT", 0, "Set the timeout at TIMEOUT [ms] for server reply (useful with IIS servers - which don't send handshake failure messages).\n\
