@@ -167,6 +167,11 @@ typedef struct {
 	CipherSuite id;
 } CSuiteDesc;
 
+typedef struct {
+	CSuiteDesc* CSArray;
+	int nol;
+} CSuiteList;
+
    
    
 

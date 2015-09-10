@@ -24,6 +24,7 @@ limitations under the License. */
 #include <unistd.h>
 #include <time.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <argp.h>
 #include <config.h>
 
@@ -32,15 +33,22 @@ limitations under the License. */
 
 #define PING_ATT_MAX 4 // number of ping attempts when using ping to set timeout
 #define TIMEOUT_DEFAULT 500 // default timeout [ms]
+#define SERVER_BUFLEN 2048 // incoming data buffer length - used in server mode
 
 
 uint24 hton24(uint32); // convert uint24 to big endian
 
 void fill_random (uint8*, size_t); // fills memory area with pseudo-random data
 
-int searchCS(char*,CSuiteDesc*,int); // search for a cipher suite in the list, returning its position in the CSuitesL
+CSuiteList loadCSList(char*); // load Cipher Suite list from the file passed as argument, return a Cipher Suite list struct in case of success, else return a CSuiteList with a NULL pointer as CSArray 
 
-int createConnection(struct sockaddr_in, struct timeval, struct timeval); // create tcp connection with send and receive timeouts, returns socket
+int searchCSbyName(char*,CSuiteDesc*,int); // search for a cipher suite in the list by name, returning its position in the CSuitesL, return -1 if fails
+
+int searchCSbyID(CipherSuite,CSuiteDesc*, int); // search for a cipher suite in the list by id, returning its position in the CSuitesL, return -1 if fails
+
+int createConnection(struct sockaddr_in, struct timeval, struct timeval); // create active tcp connection with send and receive timeouts, return socket (or -1 if fails)
+
+int passiveOpenConnection(int); // create passive tcp connection with listening port passed as argument, return socket (or -1 if fails)
 
 int checkSuiteSupport(struct arguments, struct sockaddr_in, 	// check for support of a certain TLS Cipher Suite:
 	struct timeval, struct timeval,						 	// last argument (selectedCS) is the position of the suite in CSuitesL array
@@ -52,6 +60,9 @@ int checkSuiteSupport(struct arguments, struct sockaddr_in, 	// check for suppor
 																
 long int ping(struct sockaddr_in);	// launch ping command, parse output and return RTT in ms, return -1 if fails
 
+void printMem(void*, size_t); // print hex data passed as pointer for all the specified size
+
+
 
 
 int main(int argc, char * argv[]) {
@@ -62,7 +73,8 @@ struct sockaddr_in sin;
 char *host;
 int port;
 int timeout_internal; // timeout
-FILE *CS_file; // IANA Cipher Suites List
+int selectedCS = -1; // initialize selected Cipher Suite with invalid value
+
 
 /* Default values for options */
 arguments.truetime=0;
@@ -72,6 +84,7 @@ arguments.CS_file="/usr/local/share/tlsprobe/tls-parameters-4.csv";
 arguments.cipherSuite="TLS_RSA_WITH_AES_128_CBC_SHA";
 arguments.fullScanMode=0;
 arguments.cipherSuiteMode=0;
+arguments.serverMode=0;
 arguments.timeout=TIMEOUT_DEFAULT;
 arguments.autotimeout=0;
 arguments.tlsVer="1.2";
@@ -80,7 +93,11 @@ arguments.tlsVer="1.2";
 argp_parse (&argp, argc, argv, 0, 0, &arguments);
 
 port=arguments.port;
-host=arguments.args[0];
+
+if (arguments.fullScanMode || arguments.cipherSuiteMode) { // if either full scan mode or cipher suite probe mode was selected, target was passed as argument
+	host=arguments.args[0];
+}
+
 
 /* Set tls version */
 if ( 0==strcmp(arguments.tlsVer, "1.0") ) {
@@ -95,136 +112,97 @@ if ( 0==strcmp(arguments.tlsVer, "1.0") ) {
 }
 
 
-/* Check for options compatibility */
-if (arguments.fullScanMode && arguments.cipherSuiteMode) { // if user triggered both -F and -c options (something that doesn't make sense)
-	printf("Sorry, -c option is incompatible with -F\n");
-	printf("Try `tlsprobe --help' or `tlsprobe --usage' for more information.\n");
-	exit(1);
-}
-if (!arguments.fullScanMode && !arguments.cipherSuiteMode) { // assure that one operation mode (-c or -F) was specified
-	printf("No operation mode was selected, aborting...\n");
-	printf("Please specify an operation mode (with -F or -c for example).\n");
-	printf("Try `tlsprobe --help' or `tlsprobe --usage' for more information.\n");
+
+/* load Cipher Suites List */
+
+CSuiteList CSList=loadCSList(arguments.CS_file);
+
+if (NULL==CSList.CSArray) {
+	printf("Error loading Cipher Suites List, aborting...\n");
 	exit(1);
 }
 
+struct timeval timeoutS, timeoutR; // socket timeouts
 
+/* if either full scan mode or cipher suite probe mode was selected  */
 
-/* open IANA Cipher Suites List */
-CS_file = fopen(arguments.CS_file,"r");
-
-if (NULL == CS_file) {
-	printf("Error while opening IANA Cipher Suites List file:\nput tls-parameters-4.csv is in this directory or specify its path through the -f option\n");
-	printf("If you miss it, you can get an up-to-date CSV file from: http://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml\n");
-	exit(1);
-}
-
-/* parse IANA Cipher Suites List */
-
-int nol=0; // number of valid lines in the file
-
-int temp1,temp2; // temporary stuff..
-char temp3[150]; // temporary stuff..
-
-while(!feof(CS_file)) // count lines
-{
-	if (3==fscanf(CS_file,"\"0x%02x,0x%02x\",%[^,],%*s",&temp1,&temp2,&temp3)) // if a valid suite was parsed
-		nol++;
-	else {
-		fgets(temp3, 150, CS_file); // skip line
-	}
-}
-
-
-rewind(CS_file); // back to the beginning of the file
-
-CSuiteDesc *CSuitesL=malloc(nol*sizeof(CSuiteDesc)); // allocate memory for cipher suites list
-
-
-int idx_f=0;
-while (!feof(CS_file)) {
-	if (3==fscanf(CS_file,"\"0x%02x,0x%02x\",%[^,],%*s", (unsigned int *)&CSuitesL[idx_f].id[0], (unsigned int *)&CSuitesL[idx_f].id[1], &CSuitesL[idx_f].name)) // if a valid suite was parsed
-		idx_f++;
-	else
-		fgets(temp3, 150, CS_file); // skip line
-}
-
-/* file parsed, close file */
-
-fclose(CS_file);
-
-/* search for the selected cipher suite */
-
-int selectedCS = searchCS(arguments.cipherSuite,CSuitesL,nol);
-if (-1==selectedCS) {
-	printf("Cipher suite %s was not found in the IANA List.\n",arguments.cipherSuite);
-	exit(1);
-}
-
-
-/* translate host name into peer’s IP address */
-
-hp = gethostbyname(host);
-if (!hp) {
-    fprintf(stderr, "unknown host: %s\n", host);
-    exit(1);
-}
-
-srand ((unsigned int) time (NULL)); // initialize random seed
-
-
-
-/* build address data structure */
-
-memset((char *)&sin, '\0', sizeof(sin));
-sin.sin_family = AF_INET;
-memcpy((char *)&sin.sin_addr, hp->h_addr, hp->h_length);
-sin.sin_port = htons(port);
-
-/* if user requested to set timeout via RTT estimation */
-if (arguments.autotimeout) {
-	long int myrtt=-1;
-	unsigned int ping_att;
-	printf("Estimating RTT in order to set timeout...\n");
-	for (ping_att=1; ping_att<PING_ATT_MAX && myrtt<0; ping_att++){
-		myrtt=ping(sin);
-		if (myrtt<0){
-			printf("Server did not reply to ping #%d (or some error occurred), trying again...\n", ping_att);
-			usleep(200000); // sleep 0.2s and retry - seems like if retry immediately always fails...
-		}
-	}
-
-	if (ping_att==PING_ATT_MAX) {
-		printf("Server did not reply to any ping (or some error occurred), setting timeout to default value (%d ms).\n", TIMEOUT_DEFAULT);
-		timeout_internal=TIMEOUT_DEFAULT;
-	} else {
-		timeout_internal=myrtt+200; // setting timeout to rtt + 200ms
-		printf("Ping attempt #%d was successful, RTT was about %ld ms, setting timeout to %d ms.\n", ping_att-1, myrtt, timeout_internal);
-	}
+if (arguments.fullScanMode || arguments.cipherSuiteMode) {
 	
-} else {
-	timeout_internal=arguments.timeout;
+	/* translate host name into peer’s IP address */
+
+	hp = gethostbyname(host);
+	if (!hp) {
+		fprintf(stderr, "unknown host: %s\n", host);
+		exit(1);
+	}
+
+	srand ((unsigned int) time (NULL)); // initialize random seed
+
+
+
+	/* build address data structure */
+
+	memset((char *)&sin, '\0', sizeof(sin));
+	sin.sin_family = AF_INET;
+	memcpy((char *)&sin.sin_addr, hp->h_addr, hp->h_length);
+	sin.sin_port = htons(port);
+
+	/* if user requested to set timeout via RTT estimation */
+	if (arguments.autotimeout) {
+		long int myrtt=-1;
+		unsigned int ping_att;
+		printf("Estimating RTT in order to set timeout...\n");
+		for (ping_att=1; ping_att<PING_ATT_MAX && myrtt<0; ping_att++){
+			myrtt=ping(sin);
+			if (myrtt<0){
+				printf("Server did not reply to ping #%d (or some error occurred), trying again...\n", ping_att);
+				usleep(200000); // sleep 0.2s and retry - seems like if retry immediately always fails...
+			}
+		}
+
+		if (ping_att==PING_ATT_MAX) {
+			printf("Server did not reply to any ping (or some error occurred), setting timeout to default value (%d ms).\n", TIMEOUT_DEFAULT);
+			timeout_internal=TIMEOUT_DEFAULT;
+		} else {
+			timeout_internal=myrtt+200; // setting timeout to rtt + 200ms
+			printf("Ping attempt #%d was successful, RTT was about %ld ms, setting timeout to %d ms.\n", ping_att-1, myrtt, timeout_internal);
+		}
+	
+	} else {
+		timeout_internal=arguments.timeout;
+	}
+
+
+
+	/* set socket timeouts */
+	     
+	timeoutS.tv_sec = 2;
+	timeoutS.tv_usec = 0;
+
+	if (arguments.timeout<1000) {
+		timeoutR.tv_sec = 0;
+		timeoutR.tv_usec = timeout_internal*1000;
+	} else {
+		timeoutR.tv_sec = timeout_internal/1000;
+		timeoutR.tv_usec = (timeout_internal-(1000*timeoutR.tv_sec))*1000;
+	}
+
 }
 
-
-
-/* socket timeouts */
-struct timeval timeoutS, timeoutR;      
-timeoutS.tv_sec = 2;
-timeoutS.tv_usec = 0;
-
-if (arguments.timeout<1000) {
-	timeoutR.tv_sec = 0;
-	timeoutR.tv_usec = timeout_internal*1000;
-} else {
-	timeoutR.tv_sec = timeout_internal/1000;
-	timeoutR.tv_usec = (timeout_internal-(1000*timeoutR.tv_sec))*1000;
-}
 
 
 /* single cipher suite test mode */
-if (!arguments.fullScanMode) {
-	switch ( checkSuiteSupport(arguments, sin, timeoutS, timeoutR, CSuitesL, selectedCS) ) {
+if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMode) {
+	/* search for the selected cipher suite */
+
+	selectedCS = searchCSbyName(arguments.cipherSuite,CSList.CSArray,CSList.nol);
+	
+	if (-1==selectedCS) {
+		printf("Cipher suite %s was not found in the IANA List.\n",arguments.cipherSuite);
+		exit(1);
+	}
+	
+	switch ( checkSuiteSupport(arguments, sin, timeoutS, timeoutR, CSList.CSArray, selectedCS) ) {
 		case 0:
 			printf("Cipher Suite SUPPORTED\n");
 			break;
@@ -250,14 +228,14 @@ if (!arguments.fullScanMode) {
 
 /* full scan mode (test for support of all known cipher suites) */
 
-else {
+else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serverMode) {
 	int noss=0; // number of supported cipher suites
 	printf("Scanning the server for supported cipher suites...\nCipher suites SUPPORTED by the server are:\n");
-	for (selectedCS=0; selectedCS < nol; selectedCS++) {
-		switch ( checkSuiteSupport(arguments, sin, timeoutS, timeoutR, CSuitesL, selectedCS) ) {
+	for (selectedCS=0; selectedCS < CSList.nol; selectedCS++) {
+		switch ( checkSuiteSupport(arguments, sin, timeoutS, timeoutR, CSList.CSArray, selectedCS) ) {
 			case 0:
 				printf("\r");
-				printf(CSuitesL[selectedCS].name);
+				printf(CSList.CSArray[selectedCS].name);
 				printf("\n");
 				noss++;
 				break;
@@ -265,7 +243,7 @@ else {
 			case 2:
 			case 3:
 				//printf("\r\t\t\t\t\t\t\t");
-				printf("\rTesting suite %d/%d...",selectedCS+1,nol+1);
+				printf("\rTesting suite %d/%d...",selectedCS+1,CSList.nol+1);
 				break;
 			case -2:
 				printf("Could not understand server reply, aborting...\n");
@@ -284,9 +262,142 @@ else {
 	
 }
 
+/* server mode */
+
+else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serverMode) {
+	
+	if (port < 1024) {
+		printf("Trying to listen on privileged (<1024) port %d.\nBeware: this may fail if you did not install tlprobe setuid (and did not setcap install too)\n", port);
+	}
+	
+	int s = passiveOpenConnection(port); // setup passive open and get socket
+	
+	if (s < 0) {
+		printf("Error while setting up passive open, aborting...\n");
+		exit(1);
+	}
+	
+	/* set up things as to unbind quickly */
+	int  optValS = 1;
+
+	if ( setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &optValS, sizeof(optValS)) < 0 ) {
+		perror("setsockopt failed\n");
+		exit(1);
+	}
+	
+	int new_s; // new socket
+	int len; // length of incoming data
+	uint8 buf[SERVER_BUFLEN]; // buffer for incoming data
+	
+	printf("Listening for TLS connections on TCP port %d...\n", port);
+	
+	
+	/* wait for incoming connection */
+	//while (1) {
+		if ((new_s = accept(s, (struct sockaddr *)&sin, &len)) < 0) {
+			perror("tlsprobe: accept");
+			printf("An error occurred while processing incoming connection, aborting...\n");
+			exit(1);
+		}
+		
+		if ( setsockopt(new_s, SOL_SOCKET, SO_REUSEADDR, &optValS, sizeof(optValS)) < 0 ) {
+			perror("setsockopt failed\n");
+			exit(1);
+		}
+		
+		len = recv(new_s, buf, sizeof(buf), 0);
+		
+		if (arguments.printMessage) { // print received data (i.e.: = received ClientHello if it's all right)
+			printMem(buf,len);
+		}
+		
+		/* parse received data */
+		if (len>=46) { // if a minimum of 46 bytes (=minimum length of ClientHello from the start to Cipher Suites Length included) were received
+			TLSPlaintext tlsPT;
+			tlsPT.type=(uint8)(*(buf));
+			tlsPT.version.major=(uint8)(*(buf+1));
+			tlsPT.version.minor=(uint8)(*(buf+2));
+			tlsPT.length=ntohs((uint16)(*(buf+3)));
+			
+			/* check if handshake message was received */
+			if (CT_HANDSHAKE!=tlsPT.type)
+				goto bad_creq;
+			
+			/* ...if so, continue parsing it... */
+			
+			tlsPT.body.msg_type=(uint8)(*(buf+5));
+			
+			// skip length -- tlsPT.body.length=(uint24)(*(buf+6));
+			
+			/* check if ClientHello message was received */
+			if (HT_CLIENT_HELLO!=tlsPT.body.msg_type)
+				goto bad_creq;
+				
+			/* ...if so, continue parsing it... */
+			
+			tlsPT.body.body.client_version.major=(uint8)(*(buf+9));
+			tlsPT.body.body.client_version.minor=(uint8)(*(buf+10));
+			
+			tlsPT.body.body.random.gmt_unix_time=ntohl((uint32)(*(buf+11)));
+			
+			// skip random bytes (28 bytes) - 11+4+28=43
+			
+			tlsPT.body.body.session_id.length=(uint8)(*(buf+43));
+			//printf("sid_len:%d\n",tlsPT.body.body.session_id.length);
+			
+			// skip session id itself 43+1+tlsPT.body.body.session_id.length
+			
+			tlsPT.body.body.cipher_suites.length=((uint16)(*(buf+43+2+tlsPT.body.body.session_id.length)));
+			
+
+			/* print offered cipher suite list */
+			int ocs_idx;
+			CipherSuite cs;
+			int cs_pos;
+			
+			printf("ClientHello was received, Cipher Suites offered by the client are (in order of preference):\n");
+			//printf("%d\n",tlsPT.body.body.cipher_suites.length);
+			
+			for (ocs_idx=0;ocs_idx<tlsPT.body.body.cipher_suites.length/2;ocs_idx++) { // 2 bytes per cipher suite
+				cs[0] = (uint8)(*(buf+43+1+tlsPT.body.body.session_id.length+2+2*ocs_idx));
+				cs[1] = (uint8)(*(buf+43+1+tlsPT.body.body.session_id.length+3+2*ocs_idx));
+				
+				//printf("%d %d\n",cs[0],cs[1]);
+				cs_pos=searchCSbyID(cs,CSList.CSArray,CSList.nol); // search for the offered cipher suite in the IANA list
+				
+				if (cs_pos!=-1) { // if CS was found in the IANA list
+					printf("%s\n",CSList.CSArray[cs_pos].name);
+				}
+			}
+			
+			printf("Finished, %d Cipher Suites were offered by the client.\n", tlsPT.body.body.cipher_suites.length/2);
+			
+			
+			
+		} 
+		else {
+		bad_creq:	printf("Could not understand client request, aborting...\n");
+					exit(1);
+		}
+		
+		
+		close(new_s);
+		close(s);
+	//}
+	
+}
+
+/* no operation mode or more than one operation mode were selected */
+else {
+	printf("Sorry, no operation MODE or more than one operation MODE were selected.\n");
+	printf("You can specify an operation mode with -F, -c or -S options.\n");
+	printf("Try with tlsprobe --help for more information.\n");
+	exit(1);
+}
 
 
-free(CSuitesL); // free memory - SHOULD DO SOMETHING IN CASE PROGRAM DOES NOT REACH THIS POINT
+
+free(CSList.CSArray); // free memory - SHOULD DO SOMETHING IN CASE PROGRAM DOES NOT REACH THIS POINT
 return 0; // return if successful
 
 }
@@ -310,10 +421,20 @@ void fill_random (uint8* ptr, size_t num_bytes)
   }
 }
 
-int searchCS(char* name,CSuiteDesc* CSL, int CSL_size) {
+int searchCSbyName(char* name,CSuiteDesc* CSL, int CSL_size) {
 	int i;
 	for(i=0;i<CSL_size;i++) {
 		if (0==strcmp(name,CSL[i].name)){
+			return i; // Cipher Suite found at element i
+		}
+	}
+	return -1; // return -1 if fails
+}
+
+int searchCSbyID(CipherSuite id,CSuiteDesc* CSL, int CSL_size) {
+	int i;
+	for(i=0;i<CSL_size;i++) {
+		if (id[0]==CSL[i].id[0] && id[1]==CSL[i].id[1]){
 			return i; // Cipher Suite found at element i
 		}
 	}
@@ -350,6 +471,35 @@ int createConnection(struct sockaddr_in sin, struct timeval timeoutS, struct tim
 	
 	return s;
 
+}
+
+int passiveOpenConnection(int port) {
+	
+	int s; // socket
+	struct sockaddr_in sin;
+	
+	memset((char *)&sin, '\0', sizeof(sin));
+	
+	sin.sin_family = AF_INET;
+	sin.sin_addr.s_addr = INADDR_ANY;
+	sin.sin_port = htons(port);
+	
+	/* passive open */
+
+	if ((s = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
+		perror("tlsprobe: socket");
+		return -1;
+	}
+	
+	if ((bind(s, (struct sockaddr *)&sin,sizeof(sin))) < 0) {
+		perror("tlsprobe: bind");
+		return -1;
+	}
+	
+	listen(s, 1); // set max num of pending connections to 1 (i.e.: refuse the 2nd connection while serving the 1st)
+	
+	return s;
+	
 }
 
 int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct timeval timeoutS, struct timeval timeoutR, CSuiteDesc *CSuitesL, int selectedCS) {
@@ -414,11 +564,7 @@ int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct
 	tlsPTCH.body=myHandShakeCH;
 	
 	if (arguments.printMessage) { // let's print ClientHello before sending it
-		unsigned int indexi;
-		for (indexi = 0; indexi < sizeof(tlsPTCH); indexi++)
-			printf("%02x", *(((uint8*)&tlsPTCH)+indexi));
-	
-		printf("\n");
+		printMem(&tlsPTCH, sizeof(tlsPTCH));
 	}
 
 
@@ -535,4 +681,71 @@ long int ping(struct sockaddr_in sin) {
 	}
 	
 	
+}
+
+CSuiteList loadCSList(char* filePath) {
+	
+	FILE *CS_file; // IANA Cipher Suites List
+	CSuiteList CSList;
+	CSList.CSArray=NULL;
+	CSList.nol=0;
+	
+	/* open IANA Cipher Suites List */
+	CS_file = fopen(filePath,"r");
+
+	if (NULL == CS_file) {
+		printf("Error while opening IANA Cipher Suites List file:\nmake sure tls-parameters-4.csv is in the default directory (/usr/local/share/tlsprobe/) or specify its path through the -f option\n");
+		printf("If you miss it, you can get an up-to-date CSV file from: http://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml\n");
+		return CSList; // which was initialized as invalid
+	}
+
+	/* parse IANA Cipher Suites List */
+
+	int nol=0; // number of valid lines in the file
+
+	int temp1,temp2; // temporary stuff..
+	char temp3[150]; // temporary stuff..
+	
+	while(!feof(CS_file)) // count lines
+	{
+		if (3==fscanf(CS_file,"\"0x%02x,0x%02x\",%[^,],%*s",&temp1,&temp2,&temp3)) // if a valid suite was parsed
+			nol++;
+		else {
+			fgets(temp3, 150, CS_file); // skip line
+		}
+	}
+
+
+	rewind(CS_file); // back to the beginning of the file
+
+	CSuiteDesc *CSuitesL=malloc(nol*sizeof(CSuiteDesc)); // allocate memory for cipher suites list
+
+
+	int idx_f=0;
+	while (!feof(CS_file)) {
+		if (3==fscanf(CS_file,"\"0x%02x,0x%02x\",%[^,],%*s", (unsigned int *)&CSuitesL[idx_f].id[0], (unsigned int *)&CSuitesL[idx_f].id[1], &CSuitesL[idx_f].name)) // if a valid suite was parsed
+			idx_f++;
+		else
+			fgets(temp3, 150, CS_file); // skip line
+	}
+
+	/* file parsed, close file */
+
+	fclose(CS_file);
+	
+	/* success, return valid data */
+	
+	CSList.CSArray=CSuitesL;
+	CSList.nol=nol;
+	
+	return CSList;
+	
+}
+
+void printMem(void* mem, size_t size) {
+	unsigned int indexi;
+	for (indexi = 0; indexi < size; indexi++)
+		printf("%02x", *(((uint8*)mem)+indexi));
+	
+	printf("\n");
 }

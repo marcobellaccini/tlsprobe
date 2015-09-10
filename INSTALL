@@ -3,12 +3,24 @@ Installation Instructions
 
 Here is how to perform a minimal installation with default options.
 
-Compile the program by typing:
+First run the configure script:
 
 ./configure
+
+If you want to be able to run tlsprobe in server mode and listen on privileged ports (ports < 1024), you should either install tlsprobe with setuid or, if you use setcap, setcap cap_net_bind_service.
+You can do so by typing:
+
+./configure --enable-setuid-install
+
+or (as root, in order to be able to see setcap):
+
+./configure --enable-setcap-install
+
+Then, to build the program, type:
+
 make
 
-then, to install the program, type (as root):
+finally, to install the program, type (as root):
 
 make install
 
