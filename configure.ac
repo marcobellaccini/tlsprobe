@@ -46,7 +46,7 @@ AM_CONDITIONAL(SETUID_INSTALL, test x$enable_setuid_install = xyes)
 AC_CHECK_FUNCS(setresuid setresgid)
 
 
-AC_CHECK_HEADERS([stdio.h sys/socket.h netinet/in.h arpa/inet.h netdb.h time.h fcntl.h argp.h],,,[AC_INCLUDES_DEFAULT])
+AC_CHECK_HEADERS([stdio.h sys/socket.h netinet/in.h arpa/inet.h netdb.h time.h fcntl.h argp.h errno.h],,,[AC_INCLUDES_DEFAULT])
 AC_CONFIG_FILES([
  Makefile
  src/Makefile

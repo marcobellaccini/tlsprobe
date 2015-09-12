@@ -172,6 +172,18 @@ typedef struct {
 	int nol;
 } CSuiteList;
 
+
+/* Cipher Suite Evaluation */
+
+typedef struct {
+	CipherSuite *modern;
+	CipherSuite *intermediate;
+	CipherSuite *old;
+	int modern_size;
+	int intermediate_size;
+	int old_size;
+} CSuiteEvals;
+
    
    
 

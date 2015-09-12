@@ -33,6 +33,7 @@ static struct argp_option options[] = {
   {"print-messages",    'm', 0,      0,  "Print sent/received ClientHello message" },
   {"port",   'p', "PORT", 0, "Set port to TCP port PORT (default is tcp/443 - HTTPS)" },
   {"cs-file",   'f', "FILE", 0, "Use IANA Cipher Suites List file FILE (default is tls-parameters-4.csv located in /usr/local/share/tlsprobe)" },
+  {"cs-eval-file",   'e', "FILE", 0, "Use Cipher Suites Evaluation file FILE (default is cs_eval.dat located in /usr/local/share/tlsprobe)" },
   {"cipher-suite",   'c', "CIPHER_SUITE_ID", 0, "Cipher Suite probe MODE: test if server supports cipher suite CIPHER_SUITE_ID (e.g. TLS_RSA_WITH_AES_128_CBC_SHA)" },
   {"full-scan",   'F', 0, 0, "Full-scan MODE: test the server for support of all the cipher suites listed in the IANA Cipher Suites List file" },
   {"timeout",   't', "TIMEOUT", 0, "Set the timeout at TIMEOUT [ms] for server reply (useful with IIS servers - which don't send handshake failure messages).\n\
@@ -48,7 +49,7 @@ struct arguments
 {
   char *args[ARGNUM];                // host and port
   int truetime, port, printMessage, fullScanMode, timeout, autotimeout, cipherSuiteMode, serverMode;
-  char *CS_file;
+  char *CS_file, *CS_eval_file;
   char *cipherSuite;
   char *tlsVer;
 };
@@ -76,6 +77,9 @@ parse_opt (int key, char *arg, struct argp_state *state)
 	break;
 	case 'f':
       arguments->CS_file = arg;
+	break;
+	case 'e':
+      arguments->CS_eval_file = arg;
 	break;
 	case 'c':
       arguments->cipherSuite = arg;

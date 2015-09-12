@@ -1,4 +1,3 @@
 TODO List:
--fix "Address already in use" issue with server mode
 -add internal ping capabilities through setcap
 -server mode argument

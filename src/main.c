@@ -25,6 +25,7 @@ limitations under the License. */
 #include <time.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <errno.h>
 #include <argp.h>
 #include <config.h>
 
@@ -34,6 +35,13 @@ limitations under the License. */
 #define PING_ATT_MAX 4 // number of ping attempts when using ping to set timeout
 #define TIMEOUT_DEFAULT 500 // default timeout [ms]
 #define SERVER_BUFLEN 2048 // incoming data buffer length - used in server mode
+
+/* color codes for Cipher Suite security Evaluation */
+#define KGRN  "\x1B[32m"
+#define KCYN  "\x1B[36m"
+#define KYEL  "\x1B[33m"
+#define KRED  "\x1B[31m"
+#define KRESET "\033[0m"
 
 
 uint24 hton24(uint32); // convert uint24 to big endian
@@ -60,15 +68,22 @@ int checkSuiteSupport(struct arguments, struct sockaddr_in, 	// check for suppor
 																
 long int ping(struct sockaddr_in);	// launch ping command, parse output and return RTT in ms, return -1 if fails
 
+struct sockaddr_in getSockAddr(char *,int); // get socket address struct from host and port
+
 void printMem(void*, size_t); // print hex data passed as pointer for all the specified size
 
+CSuiteEvals loadCSEvals(char*); // load Cipher Suite Evaluations from the file passed as argument, return a valid CSuiteEvals struct in case of success
 
+int scanSuiteSecList (CipherSuite, CipherSuite *, int); // search for selected Cipher Suite in memory area pointed by the passed pointer, return 0 if found, else 1
+
+int checkSuiteSecurity (CipherSuite, CSuiteEvals); // return security level of the suite (0=max, 3=min) - from Mozilla definitions (see https://wiki.mozilla.org/Security/Server_Side_TLS )
+
+void printSecColor (int); // print text in the right color associated with security level: green=high, cyan=good, yellow=poor, red=critical
 
 
 int main(int argc, char * argv[]) {
 
 struct arguments arguments; // argp options struct
-struct hostent *hp;
 struct sockaddr_in sin;
 char *host;
 int port;
@@ -81,6 +96,7 @@ arguments.truetime=0;
 arguments.port=443;
 arguments.printMessage=0;
 arguments.CS_file="/usr/local/share/tlsprobe/tls-parameters-4.csv";
+arguments.CS_eval_file="/usr/local/share/tlsprobe/cs_eval.dat";
 arguments.cipherSuite="TLS_RSA_WITH_AES_128_CBC_SHA";
 arguments.fullScanMode=0;
 arguments.cipherSuiteMode=0;
@@ -122,30 +138,27 @@ if (NULL==CSList.CSArray) {
 	exit(1);
 }
 
+/* load Cipher Suites Evaluations */
+
+CSuiteEvals CSEvalSt = loadCSEvals(arguments.CS_eval_file);
+//printf("%d %d %d\n", CSEvalSt.modern_size,CSEvalSt.intermediate_size,CSEvalSt.old_size);
+//printMem(CSEvalSt.modern, 2*CSEvalSt.modern_size);
+//exit(1);
+
+
 struct timeval timeoutS, timeoutR; // socket timeouts
 
 /* if either full scan mode or cipher suite probe mode was selected  */
 
 if (arguments.fullScanMode || arguments.cipherSuiteMode) {
 	
-	/* translate host name into peer’s IP address */
+	
+	/* initialize random seed - this is for random parts of TLS payload*/
+	srand ((unsigned int) time (NULL)); // 
 
-	hp = gethostbyname(host);
-	if (!hp) {
-		fprintf(stderr, "unknown host: %s\n", host);
-		exit(1);
-	}
+	/* get socket address struct */
+	sin=getSockAddr(host, port);
 
-	srand ((unsigned int) time (NULL)); // initialize random seed
-
-
-
-	/* build address data structure */
-
-	memset((char *)&sin, '\0', sizeof(sin));
-	sin.sin_family = AF_INET;
-	memcpy((char *)&sin.sin_addr, hp->h_addr, hp->h_length);
-	sin.sin_port = htons(port);
 
 	/* if user requested to set timeout via RTT estimation */
 	if (arguments.autotimeout) {
@@ -174,7 +187,7 @@ if (arguments.fullScanMode || arguments.cipherSuiteMode) {
 
 
 
-	/* set socket timeouts */
+	/* socket timeouts for client mode operation */
 	     
 	timeoutS.tv_sec = 2;
 	timeoutS.tv_usec = 0;
@@ -197,6 +210,7 @@ if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMod
 
 	selectedCS = searchCSbyName(arguments.cipherSuite,CSList.CSArray,CSList.nol);
 	
+	
 	if (-1==selectedCS) {
 		printf("Cipher suite %s was not found in the IANA List.\n",arguments.cipherSuite);
 		exit(1);
@@ -204,7 +218,9 @@ if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMod
 	
 	switch ( checkSuiteSupport(arguments, sin, timeoutS, timeoutR, CSList.CSArray, selectedCS) ) {
 		case 0:
+			printSecColor(checkSuiteSecurity (CSList.CSArray[selectedCS].id, CSEvalSt));
 			printf("Cipher Suite SUPPORTED\n");
+			printf(KRESET);
 			break;
 		case 1:
 			printf("Cipher Suite NOT SUPPORTED (handshake failure received)\n");
@@ -224,6 +240,8 @@ if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMod
 
 	}
 
+	printf("Legend: " KGRN "SAFER " KCYN "SAFE " KYEL "WEAK " KRED "WEAKER\n" KRESET);
+
 }
 
 /* full scan mode (test for support of all known cipher suites) */
@@ -235,8 +253,9 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 		switch ( checkSuiteSupport(arguments, sin, timeoutS, timeoutR, CSList.CSArray, selectedCS) ) {
 			case 0:
 				printf("\r");
+				printSecColor(checkSuiteSecurity (CSList.CSArray[selectedCS].id, CSEvalSt));
 				printf(CSList.CSArray[selectedCS].name);
-				printf("\n");
+				printf(KRESET "\n");
 				noss++;
 				break;
 			case 1:
@@ -258,6 +277,8 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 	printf("\rFinished, %d supported cipher suites were found.\n", noss);
 	if (0==noss) {
 		printf("Maybe you have to set a bigger timeout?\n");
+	} else {
+		printf("Legend: " KGRN "SAFER " KCYN "SAFE " KYEL "WEAK " KRED "WEAKER\n" KRESET);
 	}
 	
 }
@@ -266,24 +287,13 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 
 else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serverMode) {
 	
-	if (port < 1024) {
-		printf("Trying to listen on privileged (<1024) port %d.\nBeware: this may fail if you did not install tlprobe setuid (and did not setcap install too)\n", port);
-	}
-	
 	int s = passiveOpenConnection(port); // setup passive open and get socket
 	
 	if (s < 0) {
 		printf("Error while setting up passive open, aborting...\n");
 		exit(1);
-	}
-	
-	/* set up things as to unbind quickly */
-	int  optValS = 1;
+	}		
 
-	if ( setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &optValS, sizeof(optValS)) < 0 ) {
-		perror("setsockopt failed\n");
-		exit(1);
-	}
 	
 	int new_s; // new socket
 	int len; // length of incoming data
@@ -300,11 +310,7 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 			exit(1);
 		}
 		
-		if ( setsockopt(new_s, SOL_SOCKET, SO_REUSEADDR, &optValS, sizeof(optValS)) < 0 ) {
-			perror("setsockopt failed\n");
-			exit(1);
-		}
-		
+				
 		len = recv(new_s, buf, sizeof(buf), 0);
 		
 		if (arguments.printMessage) { // print received data (i.e.: = received ClientHello if it's all right)
@@ -366,12 +372,14 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 				cs_pos=searchCSbyID(cs,CSList.CSArray,CSList.nol); // search for the offered cipher suite in the IANA list
 				
 				if (cs_pos!=-1) { // if CS was found in the IANA list
+					printSecColor(checkSuiteSecurity (CSList.CSArray[cs_pos].id, CSEvalSt));
 					printf("%s\n",CSList.CSArray[cs_pos].name);
+					printf(KRESET);
 				}
 			}
 			
 			printf("Finished, %d Cipher Suites were offered by the client.\n", tlsPT.body.body.cipher_suites.length/2);
-			
+			printf("Legend: " KGRN "SAFER " KCYN "SAFE " KYEL "WEAK " KRED "WEAKER\n" KRESET);
 			
 			
 		} 
@@ -398,6 +406,10 @@ else {
 
 
 free(CSList.CSArray); // free memory - SHOULD DO SOMETHING IN CASE PROGRAM DOES NOT REACH THIS POINT
+free(CSEvalSt.modern);
+free(CSEvalSt.intermediate);
+free(CSEvalSt.old);
+
 return 0; // return if successful
 
 }
@@ -490,9 +502,23 @@ int passiveOpenConnection(int port) {
 		perror("tlsprobe: socket");
 		return -1;
 	}
-	
+
+	/* bind even if port is in TIME_WAIT state */
+	int  optValS = 1;
+
+	if ( setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &optValS, sizeof(optValS)) < 0 ) {
+		perror("setsockopt failed\n");
+		exit(1);
+	}
+
+	/* bind */
 	if ((bind(s, (struct sockaddr *)&sin,sizeof(sin))) < 0) {
 		perror("tlsprobe: bind");
+		if (EACCES==errno) {
+			printf("Error trying to listen on privileged (<1024) port.\n"
+			"Please either specify an unprivileged (>=1024) port with -p option, install tlprobe setuid root, or setcap-mode install.\n"
+			"See tlsprobe INSTALL file for details.\n");
+		}
 		return -1;
 	}
 	
@@ -748,4 +774,175 @@ void printMem(void* mem, size_t size) {
 		printf("%02x", *(((uint8*)mem)+indexi));
 	
 	printf("\n");
+}
+
+struct sockaddr_in getSockAddr(char *host, int port) {
+
+	struct sockaddr_in sin;
+	struct hostent *hp;
+	
+	/* translate host name into peer’s IP address */
+	
+	hp = gethostbyname(host);
+	if (!hp) {
+		fprintf(stderr, "unknown host: %s\n", host);
+		exit(1);
+	}
+
+	/* build address data structure */
+
+	memset((char *)&sin, '\0', sizeof(sin));
+	sin.sin_family = AF_INET;
+	memcpy((char *)&sin.sin_addr, hp->h_addr, hp->h_length);
+	sin.sin_port = htons(port);
+
+	return sin;
+	
+}
+
+CSuiteEvals loadCSEvals(char* filePath) {
+
+	FILE *CSE_file; // Cipher Suites Evals file
+	CSuiteEvals CSEList;
+
+	// initialize
+	CSEList.modern=NULL;
+	CSEList.intermediate=NULL;
+	CSEList.old=NULL;
+	CSEList.modern_size=0;
+	CSEList.intermediate_size=0;
+	CSEList.old_size=0;
+	
+	/* open Cipher Suites Evaluation file */
+	CSE_file = fopen(filePath,"r");
+
+	if (NULL == CSE_file) {
+		printf("Error while opening Cipher Suites Evaluation file:\nmake sure cs_eval.dat is in the default directory (/usr/local/share/tlsprobe/) or specify its path through the -e option\n");
+		exit(1);
+	}
+
+	/* parse Cipher Suites Evaluation file */
+	char line[300];
+	uint8 a,b;
+
+	/* search for <modern> tag */
+	
+
+	while(!feof(CSE_file))
+	{
+		
+		fgets(line, sizeof(line), CSE_file);
+
+		if (NULL != strstr(line,"<modern>")) {
+			while (NULL == strstr(line,"</modern>") && !feof(CSE_file)) {
+
+				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a, &b)) {
+					CSEList.modern_size++;
+					CSEList.modern=realloc(CSEList.modern,CSEList.modern_size*sizeof(CipherSuite));
+					(*(CSEList.modern+CSEList.modern_size-1))[0]=a;
+					(*(CSEList.modern+CSEList.modern_size-1))[1]=b;
+				}
+
+				fgets(line, sizeof(line), CSE_file);
+			}
+			
+		}
+		else if (NULL != strstr(line,"<intermediate>")) {
+			while (NULL == strstr(line,"</intermediate>") && !feof(CSE_file)) {
+
+				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a, &b)) {
+					CSEList.intermediate_size++;
+					CSEList.intermediate=realloc(CSEList.intermediate,CSEList.intermediate_size*sizeof(CipherSuite));
+					(*(CSEList.intermediate+CSEList.intermediate_size-1))[0]=a;
+					(*(CSEList.intermediate+CSEList.intermediate_size-1))[1]=b;
+				}
+
+				fgets(line, sizeof(line), CSE_file);
+			}
+			
+		}
+		else if (NULL != strstr(line,"<old>")) {
+			while (NULL == strstr(line,"</old>") && !feof(CSE_file)) {
+
+				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a, &b)) {
+					CSEList.old_size++;
+					CSEList.old=realloc(CSEList.old,CSEList.old_size*sizeof(CipherSuite));
+					(*(CSEList.old+CSEList.old_size-1))[0]=a;
+					(*(CSEList.old+CSEList.old_size-1))[1]=b;
+				}
+
+				fgets(line, sizeof(line), CSE_file);
+			}
+			
+		}
+
+	}
+
+	/* close file */
+
+	fclose(CSE_file);
+
+	/* if file was parsed correctly, returns struct */
+	if ( CSEList.modern_size>0 && CSEList.intermediate_size>0 && CSEList.old_size>0 ) {
+
+		return CSEList;
+		
+	} else {
+		
+		exit(1);
+		
+	}
+
+}
+
+int scanSuiteSecList (CipherSuite CS, CipherSuite *CSL, int size) {
+
+	unsigned int i;
+
+	for (i=0; i<size;i++) {
+		//printf("%d %d, %d %d\n",CS[0],*(CSL+i)[0],CS[1],(*(CSL+i))[1]);
+		if (CS[0]==*(CSL+i)[0] && CS[1]==(*(CSL+i))[1])
+			return 0;
+	}
+
+	return 1;
+}
+
+int checkSuiteSecurity (CipherSuite CS,CSuiteEvals CSEList) {
+
+	/* check whether suite is modern, intermediate or old */
+	if (0==scanSuiteSecList(CS, CSEList.modern, CSEList.modern_size)) {
+		return 0;
+	}
+	else if (0==scanSuiteSecList(CS, CSEList.intermediate, CSEList.intermediate_size)) {
+		return 1;
+	}
+	else if (0==scanSuiteSecList(CS, CSEList.old, CSEList.old_size)) {
+		return 2;
+	}
+	else {
+		return 3; // unknown, probably very weak suite
+	}
+
+}
+
+void printSecColor(int secLevel) {
+	switch ( secLevel ) {
+		case 0:
+			printf(KGRN);
+			break;
+		case 1:
+			printf(KCYN);
+			break;
+		case 2:
+			printf(KYEL);
+			break;
+		case 3:
+			printf(KRED);
+			break;
+		default:
+			printf("Error: unknown security level.\n");
+			exit(1);
+
+	}
 }
