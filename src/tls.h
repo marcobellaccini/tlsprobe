@@ -179,9 +179,11 @@ typedef struct {
 	CipherSuite *modern;
 	CipherSuite *intermediate;
 	CipherSuite *old;
+	CipherSuite *all;
 	int modern_size;
 	int intermediate_size;
 	int old_size;
+	int all_size;
 } CSuiteEvals;
 
    

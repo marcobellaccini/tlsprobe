@@ -41,6 +41,7 @@ limitations under the License. */
 #define KCYN  "\x1B[36m"
 #define KYEL  "\x1B[33m"
 #define KRED  "\x1B[31m"
+#define KWHT  "\x1B[37m"
 #define KRESET "\033[0m"
 
 
@@ -76,7 +77,7 @@ CSuiteEvals loadCSEvals(char*); // load Cipher Suite Evaluations from the file p
 
 int scanSuiteSecList (CipherSuite, CipherSuite *, int); // search for selected Cipher Suite in memory area pointed by the passed pointer, return 0 if found, else 1
 
-int checkSuiteSecurity (CipherSuite, CSuiteEvals); // return security level of the suite (0=max, 3=min) - from Mozilla definitions (see https://wiki.mozilla.org/Security/Server_Side_TLS )
+int checkSuiteSecurity (CipherSuite, CSuiteEvals); // return security level of the suite (0=max, 3=min, 4=unknown) - from Mozilla definitions (see https://wiki.mozilla.org/Security/Server_Side_TLS )
 
 void printSecColor (int); // print text in the right color associated with security level: green=high, cyan=good, yellow=poor, red=critical
 
@@ -240,7 +241,7 @@ if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMod
 
 	}
 
-	printf("Legend: " KGRN "SAFER " KCYN "SAFE " KYEL "WEAK " KRED "WEAKER\n" KRESET);
+	printf("Legend: " KGRN "SAFER " KCYN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "UNKNOWN\n" KRESET);
 
 }
 
@@ -278,7 +279,7 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 	if (0==noss) {
 		printf("Maybe you have to set a bigger timeout?\n");
 	} else {
-		printf("Legend: " KGRN "SAFER " KCYN "SAFE " KYEL "WEAK " KRED "WEAKER\n" KRESET);
+		printf("Legend: " KGRN "SAFER " KCYN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "UNKNOWN\n" KRESET);
 	}
 	
 }
@@ -379,7 +380,7 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 			}
 			
 			printf("Finished, %d Cipher Suites were offered by the client.\n", tlsPT.body.body.cipher_suites.length/2);
-			printf("Legend: " KGRN "SAFER " KCYN "SAFE " KYEL "WEAK " KRED "WEAKER\n" KRESET);
+			printf("Legend: " KGRN "SAFER " KCYN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "UNKNOWN\n" KRESET);
 			
 			
 		} 
@@ -809,9 +810,11 @@ CSuiteEvals loadCSEvals(char* filePath) {
 	CSEList.modern=NULL;
 	CSEList.intermediate=NULL;
 	CSEList.old=NULL;
+	CSEList.all=NULL;
 	CSEList.modern_size=0;
 	CSEList.intermediate_size=0;
 	CSEList.old_size=0;
+	CSEList.all_size=0;
 	
 	/* open Cipher Suites Evaluation file */
 	CSE_file = fopen(filePath,"r");
@@ -875,6 +878,20 @@ CSuiteEvals loadCSEvals(char* filePath) {
 			}
 			
 		}
+		else if (NULL != strstr(line,"<all>")) {
+			while (NULL == strstr(line,"</all>") && !feof(CSE_file)) {
+
+				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a, &b)) {
+					CSEList.all_size++;
+					CSEList.all=realloc(CSEList.all,CSEList.all_size*sizeof(CipherSuite));
+					(*(CSEList.all+CSEList.all_size-1))[0]=a;
+					(*(CSEList.all+CSEList.all_size-1))[1]=b;
+				}
+
+				fgets(line, sizeof(line), CSE_file);
+			}
+			
+		}
 
 	}
 
@@ -883,7 +900,7 @@ CSuiteEvals loadCSEvals(char* filePath) {
 	fclose(CSE_file);
 
 	/* if file was parsed correctly, returns struct */
-	if ( CSEList.modern_size>0 && CSEList.intermediate_size>0 && CSEList.old_size>0 ) {
+	if ( CSEList.modern_size>0 && CSEList.intermediate_size>0 && CSEList.old_size>0 && CSEList.all_size>0 ) {
 
 		return CSEList;
 		
@@ -920,8 +937,11 @@ int checkSuiteSecurity (CipherSuite CS,CSuiteEvals CSEList) {
 	else if (0==scanSuiteSecList(CS, CSEList.old, CSEList.old_size)) {
 		return 2;
 	}
+	else if (0==scanSuiteSecList(CS, CSEList.all, CSEList.all_size)) {
+		return 3; // weak suite
+	}
 	else {
-		return 3; // unknown, probably very weak suite
+		return 4; // unknown suite
 	}
 
 }
@@ -939,6 +959,9 @@ void printSecColor(int secLevel) {
 			break;
 		case 3:
 			printf(KRED);
+			break;
+		case 4:
+			printf(KWHT);
 			break;
 		default:
 			printf("Error: unknown security level.\n");

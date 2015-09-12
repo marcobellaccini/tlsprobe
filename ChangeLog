@@ -1,5 +1,10 @@
 2015-09-12  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
 
+	* Updated cs_eval.dat with one generated with last openssl version
+	* Added unknown security category
+	
+2015-09-12  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
+
 	* Added Cipher Suite Strength Evaluation with color feedback	
 	* Fixed TIME_WAIT issue
 	* Performed some code cleanup
