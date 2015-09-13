@@ -1,5 +1,9 @@
 2015-09-13  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
 
+	* Fixed cs_eval.dat
+	
+2015-09-13  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
+
 	* Changed color codes
 	* Quiet mode
 	* Updated README
