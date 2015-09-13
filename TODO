@@ -1,3 +1,6 @@
 TODO List:
 -add internal ping capabilities through setcap
 -server mode argument
+-manpage
+-multithread-mode with POSIX threads
+-code cleanup, rewrite parts with mem reallocations

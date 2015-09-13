@@ -34,13 +34,14 @@ static struct argp_option options[] = {
   {"port",   'p', "PORT", 0, "Set port to TCP port PORT (default is tcp/443 - HTTPS)" },
   {"cs-file",   'f', "FILE", 0, "Use IANA Cipher Suites List file FILE (default is tls-parameters-4.csv located in /usr/local/share/tlsprobe)" },
   {"cs-eval-file",   'e', "FILE", 0, "Use Cipher Suites Evaluation file FILE (default is cs_eval.dat located in /usr/local/share/tlsprobe)" },
-  {"cipher-suite",   'c', "CIPHER_SUITE_ID", 0, "Cipher Suite probe MODE: test if server supports cipher suite CIPHER_SUITE_ID (e.g. TLS_RSA_WITH_AES_128_CBC_SHA)" },
-  {"full-scan",   'F', 0, 0, "Full-scan MODE: test the server for support of all the cipher suites listed in the IANA Cipher Suites List file" },
+  {"cipher-suite",   'c', "CIPHER_SUITE_ID", 0, "CLIENT MODE SINGLE CIPHER SUITE PROBE: test if server supports cipher suite CIPHER_SUITE_ID (e.g. TLS_RSA_WITH_AES_128_CBC_SHA)" },
+  {"full-scan",   'F', 0, 0, "CLIENT MODE FULL-SCAN: test the server for support of all the cipher suites listed in the IANA Cipher Suites List file" },
   {"timeout",   't', "TIMEOUT", 0, "Set the timeout at TIMEOUT [ms] for server reply (useful with IIS servers - which don't send handshake failure messages).\n\
   Note: smaller timeouts mean faster scan, but may lead to unreliable results (i.e.: underestimation of the number of supported ciphers).\nDefault timeout is 500ms." },
   {"auto-timeout",   'a', 0, 0, "Autoset timeout by estimating RTT with ping (needs a shell with ping, tail, awk and cut utilities)." },
   {"tls-version",   'R', "VERSION", 0, "Use TLS version VERSION (default is VERSION=1.2)" },
-  {"server-mode",   'S', 0, 0, "Server MODE: listen for incoming connections and list offered Cipher Suites when a ClientHello message is received" },
+  {"server-mode",   'S', 0, 0, "SERVER MODE: listen for incoming connections and list offered Cipher Suites when a ClientHello message is received" },
+  {"quiet",   'q', 0, 0, "Be quiet, printing only the results (and a small subset of messages)." },
   { 0 }
 };
 
@@ -48,7 +49,7 @@ static struct argp_option options[] = {
 struct arguments
 {
   char *args[ARGNUM];                // host and port
-  int truetime, port, printMessage, fullScanMode, timeout, autotimeout, cipherSuiteMode, serverMode;
+  int truetime, port, printMessage, fullScanMode, timeout, autotimeout, cipherSuiteMode, serverMode, quiet;
   char *CS_file, *CS_eval_file;
   char *cipherSuite;
   char *tlsVer;
@@ -99,6 +100,9 @@ parse_opt (int key, char *arg, struct argp_state *state)
 	break;
 	case 'S':
       arguments->serverMode = 1;
+	break;
+	case 'q':
+      arguments->quiet = 1;
 	break;
 
     case ARGP_KEY_ARG:

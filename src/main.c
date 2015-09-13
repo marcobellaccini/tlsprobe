@@ -37,8 +37,8 @@ limitations under the License. */
 #define SERVER_BUFLEN 2048 // incoming data buffer length - used in server mode
 
 /* color codes for Cipher Suite security Evaluation */
-#define KGRN  "\x1B[32m"
 #define KCYN  "\x1B[36m"
+#define KGRN  "\x1B[32m"
 #define KYEL  "\x1B[33m"
 #define KRED  "\x1B[31m"
 #define KWHT  "\x1B[37m"
@@ -105,6 +105,7 @@ arguments.serverMode=0;
 arguments.timeout=TIMEOUT_DEFAULT;
 arguments.autotimeout=0;
 arguments.tlsVer="1.2";
+arguments.quiet=0;
 
 /* Parse our arguments; every option seen by parse_opt will be reflected in arguments. */
 argp_parse (&argp, argc, argv, 0, 0, &arguments);
@@ -165,21 +166,25 @@ if (arguments.fullScanMode || arguments.cipherSuiteMode) {
 	if (arguments.autotimeout) {
 		long int myrtt=-1;
 		unsigned int ping_att;
-		printf("Estimating RTT in order to set timeout...\n");
+		if (!arguments.quiet)
+			printf("Estimating RTT in order to set timeout...\n");
 		for (ping_att=1; ping_att<PING_ATT_MAX && myrtt<0; ping_att++){
 			myrtt=ping(sin);
 			if (myrtt<0){
-				printf("Server did not reply to ping #%d (or some error occurred), trying again...\n", ping_att);
+				if (!arguments.quiet)
+					printf("Server did not reply to ping #%d (or some error occurred), trying again...\n", ping_att);
 				usleep(200000); // sleep 0.2s and retry - seems like if retry immediately always fails...
 			}
 		}
 
 		if (ping_att==PING_ATT_MAX) {
-			printf("Server did not reply to any ping (or some error occurred), setting timeout to default value (%d ms).\n", TIMEOUT_DEFAULT);
+			if (!arguments.quiet)
+				printf("Server did not reply to any ping (or some error occurred), setting timeout to default value (%d ms).\n", TIMEOUT_DEFAULT);
 			timeout_internal=TIMEOUT_DEFAULT;
 		} else {
 			timeout_internal=myrtt+200; // setting timeout to rtt + 200ms
-			printf("Ping attempt #%d was successful, RTT was about %ld ms, setting timeout to %d ms.\n", ping_att-1, myrtt, timeout_internal);
+			if (!arguments.quiet)
+				printf("Ping attempt #%d was successful, RTT was about %ld ms, setting timeout to %d ms.\n", ping_att-1, myrtt, timeout_internal);
 		}
 	
 	} else {
@@ -241,7 +246,8 @@ if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMod
 
 	}
 
-	printf("Legend: " KGRN "SAFER " KCYN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "UNKNOWN\n" KRESET);
+	if (!arguments.quiet)
+		printf("Legend: " KCYN "SAFER " KGRN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "UNKNOWN\n" KRESET);
 
 }
 
@@ -249,7 +255,8 @@ if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMod
 
 else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serverMode) {
 	int noss=0; // number of supported cipher suites
-	printf("Scanning the server for supported cipher suites...\nCipher suites SUPPORTED by the server are:\n");
+	if (!arguments.quiet)
+		printf("Scanning the server for supported cipher suites...\nCipher suites SUPPORTED by the server are:\n");
 	for (selectedCS=0; selectedCS < CSList.nol; selectedCS++) {
 		switch ( checkSuiteSupport(arguments, sin, timeoutS, timeoutR, CSList.CSArray, selectedCS) ) {
 			case 0:
@@ -263,7 +270,8 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 			case 2:
 			case 3:
 				//printf("\r\t\t\t\t\t\t\t");
-				printf("\rTesting suite %d/%d...",selectedCS+1,CSList.nol+1);
+				if (!arguments.quiet)
+					printf("\rTesting suite %d/%d...",selectedCS+1,CSList.nol+1);
 				break;
 			case -2:
 				printf("Could not understand server reply, aborting...\n");
@@ -275,11 +283,14 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 		}
 	}
 	
-	printf("\rFinished, %d supported cipher suites were found.\n", noss);
+	if (!arguments.quiet)
+		printf("\rFinished, %d supported cipher suites were found.\n", noss);
 	if (0==noss) {
-		printf("Maybe you have to set a bigger timeout?\n");
+		if (!arguments.quiet)
+			printf("Maybe you have to set a bigger timeout?\n");
 	} else {
-		printf("Legend: " KGRN "SAFER " KCYN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "UNKNOWN\n" KRESET);
+		if (!arguments.quiet)
+			printf("Legend: " KCYN "SAFER " KGRN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "UNKNOWN\n" KRESET);
 	}
 	
 }
@@ -300,7 +311,8 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 	int len; // length of incoming data
 	uint8 buf[SERVER_BUFLEN]; // buffer for incoming data
 	
-	printf("Listening for TLS connections on TCP port %d...\n", port);
+	if (!arguments.quiet)
+		printf("Listening for TLS connections on TCP port %d...\n", port);
 	
 	
 	/* wait for incoming connection */
@@ -362,7 +374,8 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 			CipherSuite cs;
 			int cs_pos;
 			
-			printf("ClientHello was received, Cipher Suites offered by the client are (in order of preference):\n");
+			if (!arguments.quiet)
+				printf("ClientHello was received, Cipher Suites offered by the client are (in order of preference):\n");
 			//printf("%d\n",tlsPT.body.body.cipher_suites.length);
 			
 			for (ocs_idx=0;ocs_idx<tlsPT.body.body.cipher_suites.length/2;ocs_idx++) { // 2 bytes per cipher suite
@@ -379,8 +392,10 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 				}
 			}
 			
-			printf("Finished, %d Cipher Suites were offered by the client.\n", tlsPT.body.body.cipher_suites.length/2);
-			printf("Legend: " KGRN "SAFER " KCYN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "UNKNOWN\n" KRESET);
+			if (!arguments.quiet) {
+				printf("Finished, %d Cipher Suites were offered by the client.\n", tlsPT.body.body.cipher_suites.length/2);
+				printf("Legend: " KCYN "SAFER " KGRN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "UNKNOWN\n" KRESET);
+			}
 			
 			
 		} 
@@ -949,10 +964,10 @@ int checkSuiteSecurity (CipherSuite CS,CSuiteEvals CSEList) {
 void printSecColor(int secLevel) {
 	switch ( secLevel ) {
 		case 0:
-			printf(KGRN);
+			printf(KCYN);
 			break;
 		case 1:
-			printf(KCYN);
+			printf(KGRN);
 			break;
 		case 2:
 			printf(KYEL);

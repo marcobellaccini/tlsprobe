@@ -1,3 +1,9 @@
+2015-09-13  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
+
+	* Changed color codes
+	* Quiet mode
+	* Updated README
+
 2015-09-12  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
 
 	* Updated cs_eval.dat with one generated with last openssl version
