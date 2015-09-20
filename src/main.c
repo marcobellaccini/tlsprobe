@@ -35,6 +35,7 @@ limitations under the License. */
 #define PING_ATT_MAX 4 // number of ping attempts when using ping to set timeout
 #define TIMEOUT_DEFAULT 500 // default timeout [ms]
 #define SERVER_BUFLEN 2048 // incoming data buffer length - used in server mode
+#define CSF_LINE_MAX 500 // max line length for cipher suite list files
 
 /* color codes for Cipher Suite security Evaluation */
 #define KCYN  "\x1B[36m"
@@ -42,6 +43,7 @@ limitations under the License. */
 #define KYEL  "\x1B[33m"
 #define KRED  "\x1B[31m"
 #define KWHT  "\x1B[37m"
+#define KGRY  "\x1B[38m"
 #define KRESET "\033[0m"
 
 
@@ -97,6 +99,7 @@ arguments.truetime=0;
 arguments.port=443;
 arguments.printMessage=0;
 arguments.CS_file="/usr/local/share/tlsprobe/tls-parameters-4.csv";
+arguments.CS_file_SSL="/usr/local/share/tlsprobe/ssl-parameters.csv";
 arguments.CS_eval_file="/usr/local/share/tlsprobe/cs_eval.dat";
 arguments.cipherSuite="TLS_RSA_WITH_AES_128_CBC_SHA";
 arguments.fullScanMode=0;
@@ -105,6 +108,7 @@ arguments.serverMode=0;
 arguments.timeout=TIMEOUT_DEFAULT;
 arguments.autotimeout=0;
 arguments.tlsVer="1.2";
+arguments.skipSSL=0;
 arguments.quiet=0;
 
 /* Parse our arguments; every option seen by parse_opt will be reflected in arguments. */
@@ -124,19 +128,30 @@ if ( 0==strcmp(arguments.tlsVer, "1.0") ) {
 	version=version11;
 } else if ( 0==strcmp(arguments.tlsVer, "1.2") ) {
 	version=version12;
+} else if ( 0==strcmp(arguments.tlsVer, "1.3") ) {
+	version=version13;
 } else {
-	printf("An unknown TLS version was specified, aborting...\n");
+	printf("An unknown TLS version was specified, aborting...\nSupported TLS versions are \"1.0\", \"1.1\", \"1.2\" and \"1.3\" (draft)\n");
 	exit(1);
 }
 
 
 
-/* load Cipher Suites List */
+/* load TLS Cipher Suites List */
 
 CSuiteList CSList=loadCSList(arguments.CS_file);
 
 if (NULL==CSList.CSArray) {
-	printf("Error loading Cipher Suites List, aborting...\n");
+	printf("Error loading TLS Cipher Suites List, aborting...\n");
+	exit(1);
+}
+
+/* load SSL Cipher Suites List */
+
+CSuiteList CSListSSL=loadCSList(arguments.CS_file_SSL);
+
+if (NULL==CSListSSL.CSArray) {
+	printf("Error loading SSL Cipher Suites List, aborting...\n");
 	exit(1);
 }
 
@@ -212,39 +227,96 @@ if (arguments.fullScanMode || arguments.cipherSuiteMode) {
 
 /* single cipher suite test mode */
 if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMode) {
-	/* search for the selected cipher suite */
+
+	int isSSL=0; // SSL3 flag
+	
+	/* search for the selected cipher suite in the TLS list */
 
 	selectedCS = searchCSbyName(arguments.cipherSuite,CSList.CSArray,CSList.nol);
-	
-	
-	if (-1==selectedCS) {
-		printf("Cipher suite %s was not found in the IANA List.\n",arguments.cipherSuite);
-		exit(1);
-	}
-	
-	switch ( checkSuiteSupport(arguments, sin, timeoutS, timeoutR, CSList.CSArray, selectedCS) ) {
-		case 0:
-			printSecColor(checkSuiteSecurity (CSList.CSArray[selectedCS].id, CSEvalSt));
-			printf("Cipher Suite SUPPORTED\n");
-			printf(KRESET);
-			break;
-		case 1:
-			printf("Cipher Suite NOT SUPPORTED (handshake failure received)\n");
-			break;
-		case 2:
-			printf("Cipher Suite NOT SUPPORTED (timeout)\n");
-			break;
-		case 3:
-			printf("Cipher Suite NOT SUPPORTED (server closed TCP connection)\n");
-			break;
-		case -2:
-			printf("Could not understand server reply, aborting...\n");
-		case -1:
-		default:
-			printf("An error occurred while checking for cipher suite support\n");
-			exit(1);
 
+	if (-1 != selectedCS) { // if found
+		if (!arguments.quiet) {
+			printf("Probing for support of TLS Cipher Suite %s\n", arguments.cipherSuite);
+		}
 	}
+	
+	else { // if not found in TLS list...
+
+		/* search for the selected cipher suite in the SSL list */
+
+		selectedCS = searchCSbyName(arguments.cipherSuite,CSListSSL.CSArray,CSListSSL.nol);
+
+		if (-1 != selectedCS) { // if found
+
+			isSSL=1;
+			version=version30; // set SSL version 3 instead of default (TLS 1.2)
+			
+			if (!arguments.quiet) {
+				printf("Probing for support of SSL Cipher Suite %s\n", arguments.cipherSuite);
+			}
+		}
+
+		else { // if not found even in the SSL list
+			printf("Unknown Cipher Suite %s.\n",arguments.cipherSuite);
+			exit(1);
+		}
+		
+		
+	}
+
+	if (!isSSL) { // if TLS
+		switch ( checkSuiteSupport(arguments, sin, timeoutS, timeoutR, CSList.CSArray, selectedCS) ) {
+			case 0:
+				printSecColor(checkSuiteSecurity (CSList.CSArray[selectedCS].id, CSEvalSt));
+				printf("Cipher Suite SUPPORTED\n");
+				printf(KRESET);
+				break;
+			case 1:
+				printf("Cipher Suite NOT SUPPORTED (handshake failure received)\n");
+				break;
+			case 2:
+				printf("Cipher Suite NOT SUPPORTED (timeout)\n");
+				break;
+			case 3:
+				printf("Cipher Suite NOT SUPPORTED (server closed TCP connection)\n");
+				break;
+			case -2:
+				printf("Could not understand server reply, aborting...\n");
+			case -1:
+			default:
+				printf("An error occurred while checking for cipher suite support\n");
+				exit(1);
+
+		}
+	}
+	else { // if SSL
+		switch ( checkSuiteSupport(arguments, sin, timeoutS, timeoutR, CSListSSL.CSArray, selectedCS) ) {
+			case 0:
+				//printSecColor(checkSuiteSecurity (CSList.CSArray[selectedCS].id, CSEvalSt));
+				printf(KRED); // SSL 3 is unsafe
+				printf("Cipher Suite SUPPORTED\n");
+				printf(KRESET);
+				break;
+			case 1:
+				printf("Cipher Suite NOT SUPPORTED (handshake failure received)\n");
+				break;
+			case 2:
+				printf("Cipher Suite NOT SUPPORTED (timeout)\n");
+				break;
+			case 3:
+				printf("Cipher Suite NOT SUPPORTED (server closed TCP connection)\n");
+				break;
+			case -2:
+				printf("Could not understand server reply, aborting...\n");
+			case -1:
+			default:
+				printf("An error occurred while checking for cipher suite support\n");
+				exit(1);
+
+		}
+	}
+	
+	
 
 	if (!arguments.quiet)
 		printf("Legend: " KCYN "SAFER " KGRN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "UNKNOWN\n" KRESET);
@@ -254,9 +326,14 @@ if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMod
 /* full scan mode (test for support of all known cipher suites) */
 
 else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serverMode) {
-	int noss=0; // number of supported cipher suites
+	int nossTLS=0; // number of supported cipher suites - TLS
+	int nossSSL=0; // number of supported cipher suites - SSL
+	
 	if (!arguments.quiet)
 		printf("Scanning the server for supported cipher suites...\nCipher suites SUPPORTED by the server are:\n");
+
+	/* scan for TLS */
+	printf("\rTLS:\n");
 	for (selectedCS=0; selectedCS < CSList.nol; selectedCS++) {
 		switch ( checkSuiteSupport(arguments, sin, timeoutS, timeoutR, CSList.CSArray, selectedCS) ) {
 			case 0:
@@ -264,7 +341,7 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 				printSecColor(checkSuiteSecurity (CSList.CSArray[selectedCS].id, CSEvalSt));
 				printf(CSList.CSArray[selectedCS].name);
 				printf(KRESET "\n");
-				noss++;
+				nossTLS++;
 				break;
 			case 1:
 			case 2:
@@ -282,10 +359,56 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 
 		}
 	}
+
+	if (0 == nossTLS) {
+		printf("\r                         ");
+		printf("\rNONE\n");
+	}
+
+	if (!arguments.skipSSL) {
+		/* scan for SSL */
+		printf("\r                         ");
+		printf("\n\rSSL3:\n");
+		version=version30; // force SSL version 3 instead of the selected version
+		for (selectedCS=0; selectedCS < CSListSSL.nol; selectedCS++) {
+			switch ( checkSuiteSupport(arguments, sin, timeoutS, timeoutR, CSListSSL.CSArray, selectedCS) ) {
+				case 0:
+					printf("\r");
+					//printSecColor(checkSuiteSecurity (CSListSSL.CSArray[selectedCS].id, CSEvalSt));
+					printf(KRED); // SSL3 is unsafe
+					printf(CSListSSL.CSArray[selectedCS].name);
+					printf(KRESET "\n");
+					nossSSL++;
+					break;
+				case 1:
+				case 2:
+				case 3:
+					//printf("\r\t\t\t\t\t\t\t");
+					if (!arguments.quiet)
+						printf("\rTesting suite %d/%d...",selectedCS+1,CSListSSL.nol+1);
+					break;
+				case -2:
+					printf("Could not understand server reply, aborting...\n");
+				case -1:
+				default:
+					printf("An error occurred while checking for cipher suite support\n");
+					exit(1);
+
+			}
+		}
+
+		if (0 == nossSSL) {
+			printf("\r                         ");
+			printf("\rNONE\n");
+		}
+		
+	}
+	
+	
 	
 	if (!arguments.quiet)
-		printf("\rFinished, %d supported cipher suites were found.\n", noss);
-	if (0==noss) {
+		printf("\rFinished, found support for %d TLS Cipher Suites and %d SSL3 Cipher Suites.\n", nossTLS, nossSSL);
+	if (0==nossTLS+nossSSL) {
 		if (!arguments.quiet)
 			printf("Maybe you have to set a bigger timeout?\n");
 	} else {
@@ -298,6 +421,8 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 /* server mode */
 
 else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serverMode) {
+
+	int isSSL=0; // SSL3 flag
 	
 	int s = passiveOpenConnection(port); // setup passive open and get socket
 	
@@ -356,6 +481,9 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 			
 			tlsPT.body.body.client_version.major=(uint8)(*(buf+9));
 			tlsPT.body.body.client_version.minor=(uint8)(*(buf+10));
+
+			if (3==tlsPT.body.body.client_version.major && 0==tlsPT.body.body.client_version.minor) // if SSL3
+				isSSL=1;
 			
 			tlsPT.body.body.random.gmt_unix_time=ntohl((uint32)(*(buf+11)));
 			
@@ -374,8 +502,14 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 			CipherSuite cs;
 			int cs_pos;
 			
-			if (!arguments.quiet)
+			if (!arguments.quiet) {
+				if (!isSSL) {
+					printf("TLS ");
+				} else {
+					printf("SSL3 ");
+				}
 				printf("ClientHello was received, Cipher Suites offered by the client are (in order of preference):\n");
+			}
 			//printf("%d\n",tlsPT.body.body.cipher_suites.length);
 			
 			for (ocs_idx=0;ocs_idx<tlsPT.body.body.cipher_suites.length/2;ocs_idx++) { // 2 bytes per cipher suite
@@ -383,18 +517,55 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 				cs[1] = (uint8)(*(buf+43+1+tlsPT.body.body.session_id.length+3+2*ocs_idx));
 				
 				//printf("%d %d\n",cs[0],cs[1]);
-				cs_pos=searchCSbyID(cs,CSList.CSArray,CSList.nol); // search for the offered cipher suite in the IANA list
+				if (!isSSL)
+					cs_pos=searchCSbyID(cs,CSList.CSArray,CSList.nol); // search for the offered cipher suite in the IANA list
+				else
+					cs_pos=searchCSbyID(cs,CSListSSL.CSArray,CSListSSL.nol);
 				
-				if (cs_pos!=-1) { // if CS was found in the IANA list
-					printSecColor(checkSuiteSecurity (CSList.CSArray[cs_pos].id, CSEvalSt));
-					printf("%s\n",CSList.CSArray[cs_pos].name);
+				if (cs_pos!=-1) { // if CS was found in the list
+					if (!isSSL) {
+						printSecColor(checkSuiteSecurity (CSList.CSArray[cs_pos].id, CSEvalSt));
+						printf("%s\n",CSList.CSArray[cs_pos].name);
+					}
+					else {
+						printf(KRED); // SSL3 is unsafe
+						printf("%s\n",CSListSSL.CSArray[cs_pos].name);
+					}
+					
 					printf(KRESET);
+				}
+				else if (0x00==cs[0] && 0xff==cs[1]) { // this handles TLS_EMPTY_RENEGOTIATION_INFO_SCSV
+
+					printf(KWHT);
+					
+					if (!isSSL) {
+						printf("TLS_EMPTY_RENEGOTIATION_INFO_SCSV\n");
+					} else {
+						printf("SSL_EMPTY_RENEGOTIATION_INFO_SCSV\n");
+					}
+
+					printf(KRESET);
+
+				}
+				else if (0x56==cs[0] && 0x00==cs[1]) { // this handles TLS_FALLBACK_SCSV
+					printf(KWHT);
+					
+					if (!isSSL) {
+						printf("TLS_FALLBACK_SCSV\n");
+					} else {
+						printf("SSL_FALLBACK_SCSV\n");
+					}
+
+					printf(KRESET);
+				}
+				else {
+					printf("An unknown Cipher Suite was received:%02x %02x.\n", cs[0], cs[1]);
 				}
 			}
 			
 			if (!arguments.quiet) {
 				printf("Finished, %d Cipher Suites were offered by the client.\n", tlsPT.body.body.cipher_suites.length/2);
-				printf("Legend: " KCYN "SAFER " KGRN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "UNKNOWN\n" KRESET);
+				printf("Legend: " KCYN "SAFER " KGRN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "SIGNAL/UNKNOWN\n" KRESET);
 			}
 			
 			
@@ -422,6 +593,7 @@ else {
 
 
 free(CSList.CSArray); // free memory - SHOULD DO SOMETHING IN CASE PROGRAM DOES NOT REACH THIS POINT
+free(CSListSSL.CSArray);
 free(CSEvalSt.modern);
 free(CSEvalSt.intermediate);
 free(CSEvalSt.old);
@@ -550,17 +722,17 @@ int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct
 
 	Alert alertMsg;
 	alertMsg.level=AL_FATAL;
-	alertMsg.description=AD_INTERNAL_ERROR;
-	// using an internal error message seems fine since is vague:
+	alertMsg.description=AD_HANDSHAKE_FAILURE;
+	// HANDSHAKE_FAILURE was chosen because is compatible with all the TLS/SSL versions supported by the program:
 	/* From TLS 1.2 RFC:
-	internal_error
-	An internal error unrelated to the peer or the correctness of the
-	protocol (such as a memory allocation failure) makes it impossible
-	to continue.  This message is always fatal. */
+	handshake_failure
+      Reception of a handshake_failure alert message indicates that the
+      sender was unable to negotiate an acceptable set of security
+      parameters given the options available.  This is a fatal error. */
 
 	TLSPlaintextAL tlsPTAL;
 	tlsPTAL.type=CT_ALERT; // handshake message
-	tlsPTAL.version=version; // TLS 1.2
+	tlsPTAL.version=version;
 	tlsPTAL.length=htons(sizeof(alertMsg));
 	tlsPTAL.body=alertMsg;
 	
@@ -568,7 +740,7 @@ int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct
 	/* build a ClientHello message */
 
 	ClientHello myClientHello;
-	myClientHello.client_version=version; //using TLS 1.2 by default
+	myClientHello.client_version=version;
 
 	time_t tv;
 	tv=time(NULL);
@@ -601,7 +773,7 @@ int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct
 
 	TLSPlaintext tlsPTCH;
 	tlsPTCH.type=CT_HANDSHAKE; // handshake message
-	tlsPTCH.version=version; // TLS 1.2
+	tlsPTCH.version=version;
 	tlsPTCH.length=htons(sizeof(myHandShakeCH));
 	tlsPTCH.body=myHandShakeCH;
 	
@@ -731,44 +903,32 @@ CSuiteList loadCSList(char* filePath) {
 	CSuiteList CSList;
 	CSList.CSArray=NULL;
 	CSList.nol=0;
+	char line[CSF_LINE_MAX];
+	CSuiteDesc actCS;
 	
 	/* open IANA Cipher Suites List */
 	CS_file = fopen(filePath,"r");
 
 	if (NULL == CS_file) {
-		printf("Error while opening IANA Cipher Suites List file:\nmake sure tls-parameters-4.csv is in the default directory (/usr/local/share/tlsprobe/) or specify its path through the -f option\n");
-		printf("If you miss it, you can get an up-to-date CSV file from: http://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml\n");
+		printf("Error while opening Cipher Suites List file:\nplease make sure tls-parameters-4.csv and ssl-parameters.csv are in the default directory (/usr/local/share/tlsprobe/) or specify their path through the -f and -g options\n");
+		printf("For TLS, you can get an up-to-date CSV file from: http://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml\n");
 		return CSList; // which was initialized as invalid
 	}
 
 	/* parse IANA Cipher Suites List */
 
+
+	CSuiteDesc *CSuitesL=NULL; // initialize Cipher Suites List pointer
+
+
 	int nol=0; // number of valid lines in the file
-
-	int temp1,temp2; // temporary stuff..
-	char temp3[150]; // temporary stuff..
-	
-	while(!feof(CS_file)) // count lines
-	{
-		if (3==fscanf(CS_file,"\"0x%02x,0x%02x\",%[^,],%*s",&temp1,&temp2,&temp3)) // if a valid suite was parsed
-			nol++;
-		else {
-			fgets(temp3, 150, CS_file); // skip line
-		}
-	}
-
-
-	rewind(CS_file); // back to the beginning of the file
-
-	CSuiteDesc *CSuitesL=malloc(nol*sizeof(CSuiteDesc)); // allocate memory for cipher suites list
-
-
-	int idx_f=0;
 	while (!feof(CS_file)) {
-		if (3==fscanf(CS_file,"\"0x%02x,0x%02x\",%[^,],%*s", (unsigned int *)&CSuitesL[idx_f].id[0], (unsigned int *)&CSuitesL[idx_f].id[1], &CSuitesL[idx_f].name)) // if a valid suite was parsed
-			idx_f++;
-		else
-			fgets(temp3, 150, CS_file); // skip line
+		fgets(line, sizeof(line), CS_file);
+		if (3==sscanf(line,"\"0x%02x,0x%02x\",%[^,],%*s", (unsigned int *)&actCS.id[0], (unsigned int *)&actCS.id[1], &actCS.name)) { // if a valid suite was parsed
+			nol++;
+			CSuitesL=realloc(CSuitesL,nol*sizeof(CSuiteDesc));
+			CSuitesL[nol-1]=actCS;
+		}
 	}
 
 	/* file parsed, close file */
@@ -840,7 +1000,7 @@ CSuiteEvals loadCSEvals(char* filePath) {
 	}
 
 	/* parse Cipher Suites Evaluation file */
-	char line[300];
+	char line[CSF_LINE_MAX];
 	uint8 a,b;
 
 	/* search for <modern> tag */

@@ -1,32 +1,42 @@
-tlsprobe - a TLS testing utility (by Marco Bellaccini - marco.bellaccini[at!]gmail.com)
+tlsprobe - a TLS/SSL testing utility (by Marco Bellaccini - marco.bellaccini[at!]gmail.com)
 
-tlsprobe is a simple program that tests a server for TLS Cipher Suites support (client mode) or, listening for incoming TLS connections, discovers Cipher Suites offered by a client (server mode).
+tlsprobe is a simple program that tests a server for TLS/SSL Cipher Suites support (client mode) or, listening for incoming TLS/SSL connections, discovers Cipher Suites offered by a client (server mode).
 tlsprobe is Free Software, released under the Apache License, Version 2.0.
 
 Website: http://marco-bellaccini.bitbucket.org/tlsprobe/
 Bitbucket project page: https://bitbucket.org/marco-bellaccini/tlsprobe
 
-In client mode, tlsprobe just sends TLS ClientHello messages, and, by looking at server's reply (if any), determines whether the selected Cipher Suite(s) is supported or not.
-tlsprobe builds TLS messages in a "byte-by-byte" fashion and so does not need any TLS library (i.e.: no OpenSSL, no GnuTLS, no libNSS).
+In client mode, tlsprobe just sends ClientHello messages, and, by looking at server's reply (if any), determines whether the selected Cipher Suite(s) is supported or not.
+tlsprobe builds TLS/SSL messages in a "byte-by-byte" fashion and so does not need any external library (i.e.: no OpenSSL, no GnuTLS, no libNSS).
 The program supports both single Cipher Suite support check and a full-scan mode (in which it checks for support of all the cipher suites listed in the IANA TLS Cipher Suite Registry - http://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-4 ).
 In server mode, it waits for a ClientHello to arrive and parse it, discovering offered Cipher Suites.
 
-tlsprobe provides you with a visual feedback of the security level of the various TLS Cipher Suites, based on Mozilla Server-Side-TLS Recommendations: https://wiki.mozilla.org/Security/Server_Side_TLS .
+tlsprobe provides you with a visual feedback of the security level of the various TLS/SSL Cipher Suites, based on Mozilla Server-Side-TLS Recommendations: https://wiki.mozilla.org/Security/Server_Side_TLS .
 It highlights the discovered Cipher Suites with different colors, depending on the estimated security level.
 
-Working at TLS level, tlsprobe is generic and also supports probing non-https services (you just have to specify the right port for the higher-level protocol with the -p option).
+Working at TLS/SSL level, tlsprobe is generic and also supports probing non-https services (you just have to specify the right port for the higher-level protocol with the -p option).
+
+tlsprobe supports SSL 3.0, TLS 1.0, TLS 1.1, TLS 1.2 and TLS 1.3 (draft).
 
 Here follows some usage examples.
 
 >>Client mode
 
-List all Cipher Suites supported by www.google.com (https, tcp port 443):
+List all Cipher Suites supported by www.google.com through TLS and SSL protocols (https, tcp port 443):
 
 tlsprobe -F www.google.com
+
+List all TLS Cipher Suites (i.e.: skip SSL3 scanning phase) supported by www.google.com (https, tcp port 443):
+
+tlsprobe -j -F www.google.com
 
 Tests if www.google.com (https, tcp port 443) supports cipher suite TLS_RSA_WITH_AES_128_CBC_SHA:
 
 tlsprobe -c TLS_RSA_WITH_AES_128_CBC_SHA www.google.com
+
+Tests if www.google.com (https, tcp port 443) supports cipher suite SSL_RSA_WITH_AES_128_CBC_SHA (with SSL 3.0 protocol):
+
+tlsprobe -c SSL_RSA_WITH_AES_128_CBC_SHA www.google.com
 
 List all Cipher Suites supported by Active Directory Domain Controller 10.0.0.5 with LDAP over ssl/tls (ldaps, tcp port 636):
 

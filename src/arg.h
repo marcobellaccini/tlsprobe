@@ -22,7 +22,7 @@ const char *argp_program_bug_address =
 
 /* Program documentation. */
 static char doc[] =
-  "tlsprobe -- a TLS tester utility";
+  "tlsprobe -- a TLS/SSL tester utility";
 
 /* A description of the arguments we accept. */
 static char args_doc[] = "host";
@@ -32,7 +32,8 @@ static struct argp_option options[] = {
   {"true-time",    'T', 0,      0,  "Insert real Unix timestamp in TLS messages instead of random data (see https://bugzilla.mozilla.org/show_bug.cgi?id=967923 for details)" },
   {"print-messages",    'm', 0,      0,  "Print sent/received ClientHello message" },
   {"port",   'p', "PORT", 0, "Set port to TCP port PORT (default is tcp/443 - HTTPS)" },
-  {"cs-file",   'f', "FILE", 0, "Use IANA Cipher Suites List file FILE (default is tls-parameters-4.csv located in /usr/local/share/tlsprobe)" },
+  {"tls-file",   'f', "FILE", 0, "Use IANA TLS Cipher Suites List file FILE (default is tls-parameters-4.csv located in /usr/local/share/tlsprobe)" },
+  {"ssl-file",   'g', "FILE", 0, "Use SSL Cipher Suites List file FILE (default is ssl-parameters.csv located in /usr/local/share/tlsprobe)" },
   {"cs-eval-file",   'e', "FILE", 0, "Use Cipher Suites Evaluation file FILE (default is cs_eval.dat located in /usr/local/share/tlsprobe)" },
   {"cipher-suite",   'c', "CIPHER_SUITE_ID", 0, "CLIENT MODE SINGLE CIPHER SUITE PROBE: test if server supports cipher suite CIPHER_SUITE_ID (e.g. TLS_RSA_WITH_AES_128_CBC_SHA)" },
   {"full-scan",   'F', 0, 0, "CLIENT MODE FULL-SCAN: test the server for support of all the cipher suites listed in the IANA Cipher Suites List file" },
@@ -42,6 +43,7 @@ static struct argp_option options[] = {
   {"tls-version",   'R', "VERSION", 0, "Use TLS version VERSION (default is VERSION=1.2)" },
   {"server-mode",   'S', 0, 0, "SERVER MODE: listen for incoming connections and list offered Cipher Suites when a ClientHello message is received" },
   {"quiet",   'q', 0, 0, "Be quiet, printing only the results (and a small subset of messages)." },
+  {"skip-ssl",   'j', 0, 0, "Skip SSL3 scan when performing a full-scan." },
   { 0 }
 };
 
@@ -49,8 +51,8 @@ static struct argp_option options[] = {
 struct arguments
 {
   char *args[ARGNUM];                // host and port
-  int truetime, port, printMessage, fullScanMode, timeout, autotimeout, cipherSuiteMode, serverMode, quiet;
-  char *CS_file, *CS_eval_file;
+  int truetime, port, printMessage, fullScanMode, timeout, autotimeout, cipherSuiteMode, serverMode, quiet, skipSSL;
+  char *CS_file, *CS_eval_file, *CS_file_SSL;
   char *cipherSuite;
   char *tlsVer;
 };
@@ -79,6 +81,9 @@ parse_opt (int key, char *arg, struct argp_state *state)
 	case 'f':
       arguments->CS_file = arg;
 	break;
+	case 'g':
+      arguments->CS_file_SSL = arg;
+	break;
 	case 'e':
       arguments->CS_eval_file = arg;
 	break;
@@ -103,6 +108,9 @@ parse_opt (int key, char *arg, struct argp_state *state)
 	break;
 	case 'q':
       arguments->quiet = 1;
+	break;
+	case 'j':
+      arguments->skipSSL = 1;
 	break;
 
     case ARGP_KEY_ARG:

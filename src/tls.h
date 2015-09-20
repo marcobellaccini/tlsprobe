@@ -36,9 +36,11 @@ typedef struct {
 } ProtocolVersion;
 
 ProtocolVersion version;
+ProtocolVersion version30 = { 3, 0 };     // SSL 3.0
 ProtocolVersion version10 = { 3, 1 };     // TLS 1.0
 ProtocolVersion version11 = { 3, 2 };     // TLS 1.1
 ProtocolVersion version12 = { 3, 3 };     // TLS 1.2
+ProtocolVersion version13 = { 3, 4 };     // TLS 1.3 (draft)
 
    
 /* Alert Messages */

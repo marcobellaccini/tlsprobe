@@ -1,3 +1,10 @@
+2015-09-20  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
+
+	* SSL3 support
+	* TLS1.3 (draft) support
+	* improved CS loading function
+	* corrected TLS_EMPTY_RENEGOTIATION_INFO_SCSV and TLS_FALLBACK_SCSV handling
+
 2015-09-13  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
 
 	* Fixed cs_eval.dat

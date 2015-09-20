@@ -1,5 +1,5 @@
 SUBDIRS = src
-dist_pkgdata_DATA=tls-parameters-4.csv cs_eval.dat
+dist_pkgdata_DATA=tls-parameters-4.csv ssl-parameters.csv cs_eval.dat
 
 install-exec-hook:
 if SETCAP_INSTALL

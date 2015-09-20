@@ -3,4 +3,5 @@ TODO List:
 -server mode argument
 -manpage
 -multithread-mode with POSIX threads
--code cleanup, rewrite parts with mem reallocations
+-code cleanup
+-enforce TLS version check

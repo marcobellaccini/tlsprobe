@@ -243,7 +243,7 @@ top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 SUBDIRS = src
-dist_pkgdata_DATA = tls-parameters-4.csv cs_eval.dat
+dist_pkgdata_DATA = tls-parameters-4.csv ssl-parameters.csv cs_eval.dat
 all: config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-recursive
 
