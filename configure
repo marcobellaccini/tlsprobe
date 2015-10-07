@@ -3539,6 +3539,10 @@ fi
 ac_config_headers="$ac_config_headers config.h"
 
 
+PTHREAD_CFLAGS="-pthread"
+PTHREAD_LIBS=""
+CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
+
 
 # Extract the first word of "setcap", so it can be a program name with args.
 set dummy setcap; ac_word=$2
@@ -4056,7 +4060,7 @@ fi
 done
 
 
-for ac_header in stdio.h sys/socket.h netinet/in.h arpa/inet.h netdb.h time.h fcntl.h argp.h errno.h
+for ac_header in stdio.h sys/socket.h netinet/in.h arpa/inet.h netdb.h time.h fcntl.h argp.h errno.h pthread.h
 do :
   as_ac_Header=`$as_echo "ac_cv_header_$ac_header" | $as_tr_sh`
 ac_fn_c_check_header_compile "$LINENO" "$ac_header" "$as_ac_Header" "$ac_includes_default

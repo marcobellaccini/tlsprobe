@@ -6,6 +6,7 @@
 #used openssl 1.0.2d and "openssl ciphers -V 'CIPHER-SUITE-CONFIG' | cut -c 11-19" to get these lists
 #used ALL and eNULL for all, plus 0x00,0x00
 #where CIPHER-SUITE-CONFIG is the proposed openssl Ciphersuite config
+#ChaCha suites have been added and considered "modern"
 
 <modern>
 0xC0,0x2F
@@ -30,6 +31,9 @@
 0x00,0x6B
 0x00,0x38
 0x00,0x39
+0xCC,0x13
+0xCC,0x14
+0xCC,0x15
 </modern>
 
 <intermediate>

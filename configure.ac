@@ -3,6 +3,10 @@ AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 AC_PROG_CC
 AC_CONFIG_HEADERS([config.h])
 
+PTHREAD_CFLAGS="-pthread"
+PTHREAD_LIBS=""
+CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
+
 
 dnl Check if tlsprobe should be installed with filesystem capabilities
 AC_PATH_PROG(SETCAP, setcap)
@@ -46,7 +50,7 @@ AM_CONDITIONAL(SETUID_INSTALL, test x$enable_setuid_install = xyes)
 AC_CHECK_FUNCS(setresuid setresgid)
 
 
-AC_CHECK_HEADERS([stdio.h sys/socket.h netinet/in.h arpa/inet.h netdb.h time.h fcntl.h argp.h errno.h],,,[AC_INCLUDES_DEFAULT])
+AC_CHECK_HEADERS([stdio.h sys/socket.h netinet/in.h arpa/inet.h netdb.h time.h fcntl.h argp.h errno.h pthread.h],,,[AC_INCLUDES_DEFAULT])
 AC_CONFIG_FILES([
  Makefile
  src/Makefile

@@ -1,3 +1,31 @@
+2015-10-07  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
+
+	* minor bugfix
+	* added support for some old cipher suites
+
+2015-10-06  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
+
+	* fixed some threads-related bugs
+
+2015-10-05  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
+
+	* fixed some bugs
+
+2015-10-04  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
+
+	* added support for elliptic_curves and ec_point_formats TLS Extensions
+
+2015-10-03  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
+
+	* reorganized ClientHello generation procedure
+	* added support for server_name TLS Extension
+	* added ChaCha Cipher Suites support
+
+2015-09-26  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
+
+	* basic multi-thread support (enabled by default)
+	* fixed nasty memory bug
+
 2015-09-20  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
 
 	* SSL3 support

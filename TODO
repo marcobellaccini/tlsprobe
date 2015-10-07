@@ -2,6 +2,12 @@ TODO List:
 -add internal ping capabilities through setcap
 -server mode argument
 -manpage
--multithread-mode with POSIX threads
+-make multithread-mode more efficient
 -code cleanup
 -enforce TLS version check
+-use getopt instead of argp in order to be more portable
+-improve ec list handling
+-discover server cipher suite preference order
+-discover dh param length
+-discover rsa primes length
+-discover server supported elliptic curves (and order?)

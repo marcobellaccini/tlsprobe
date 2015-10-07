@@ -93,28 +93,110 @@ typedef struct {
 	opaque random_bytes[28];
 } Random;
 
-   
-typedef struct {
-	uint8 length;
-} SessionID;
 
-typedef uint8 CipherSuite[2];
-   
 typedef struct {
+	uint8 a;
+	uint8 b;
+} CipherSuite;
+
+typedef uint8_t CompressionMethod;
+
+/* TLS Extensions for Hello Messages */
+
+typedef struct {
+	uint16 type;
 	uint16 length;
-	CipherSuite suite1;
-} CipherSuitesList;
+} Extension;
+
+// server_name extension data
+typedef struct {
+	uint16 list_length;
+	uint16 name_type;
+	uint8 name_length;
+	char* name;
+} ServerNameExData;
+
+// elliptic curves extension data
+typedef struct {
+	uint16 ECLength;
+	uint16* curves; // beware, you fixed 35 elements!!!
+} ECExData;
+
+// elliptic curves point formats extension data
+typedef struct {
+	uint8 formats_length;
+	uint8* formats; // beware, you fixed 1 element!!!
+} ECPFExData;
+
+// TLS Extensions
+#define TLS_EXT_SERVER_NAME 0x0000
+#define TLS_EXT_EC 0x000a
+#define TLS_EXT_EC_PF 0x000b
+
+// server name
+#define TLS_EXT_SERVER_NAME_HOSTNAME 0x0000
+
+// elliptic curves
+/*
+#define TLS_EXT_EC_SECT163K1 1
+#define TLS_EXT_EC_SECT163R1 2
+#define TLS_EXT_EC_SECT163R2 3
+#define TLS_EXT_EC_SECT193R1 4
+#define TLS_EXT_EC_SECT193R2 5
+#define TLS_EXT_EC_SECT233K1 6
+#define TLS_EXT_EC_SECT233R1 7
+#define TLS_EXT_EC_SECT239K1 8
+#define TLS_EXT_EC_SECT283K1 9
+#define TLS_EXT_EC_SECT283R1 10
+#define TLS_EXT_EC_SECT409K1 11
+#define TLS_EXT_EC_SECT409R1 12
+#define TLS_EXT_EC_SECT571K1 13
+#define TLS_EXT_EC_SECT571R1 14
+#define TLS_EXT_EC_SECP160K1 15
+#define TLS_EXT_EC_SECP160R1 16
+#define TLS_EXT_EC_SECP160R2 17
+#define TLS_EXT_EC_SECP192K1 18
+#define TLS_EXT_EC_SECP192R1 19
+#define TLS_EXT_EC_SECP224K1 20
+#define TLS_EXT_EC_SECP224R1 21
+#define TLS_EXT_EC_SECP256K1 22
+#define TLS_EXT_EC_SECP256R1 23
+#define TLS_EXT_EC_SECP384R1 24
+#define TLS_EXT_EC_SECP521R1 25
+#define TLS_EXT_EC_BRAINPOOLP256R1 26
+#define TLS_EXT_EC_BRAINPOOLP384R1 27
+#define TLS_EXT_EC_BRAINPOOLP512R1 28
+#define TLS_EXT_EC_FFDHE2048 256
+#define TLS_EXT_EC_FFDHE3072 257
+#define TLS_EXT_EC_FFDHE4096 258
+#define TLS_EXT_EC_FFDHE6144 259
+#define TLS_EXT_EC_FFDHE8192 260
+#define TLS_EXT_EC_ARB_EXP_PRIME_CURV 65281
+#define TLS_EXT_EC_ARB_EXP_CHAR2_CURV 65282
+*/
+
+
+// elliptic curves point formats
+#define TLS_EXT_EC_PF_UN 0
    
 
 typedef struct {
 	ProtocolVersion client_version;
 	Random random;
-	SessionID session_id;
-	CipherSuitesList cipher_suites;
-	uint16 compression_methods;
-	//uint16 extensions_length; // not supported in TLS versions < 1.2
+	uint8 session_id;
+	uint16 cipher_suites_length;
+	CipherSuite* cipher_suites;
+	uint8 compression_methods_length;
+	CompressionMethod* compression_methods;
+	uint16 extensions_length;
 } ClientHello;
-   
+
+
+// Compression Methods
+
+#define CM_NO_COMPRESSION 0
+
+
 /* Handshake Protocol */
 typedef uint8_t HandshakeType;
    
@@ -134,7 +216,6 @@ typedef uint8_t HandshakeType;
 typedef struct {
 	HandshakeType msg_type;
 	uint24 length;
-	ClientHello body;
 } HandshakeClientHello;
    
    
@@ -151,7 +232,6 @@ typedef struct {
 	uint8 type;
 	ProtocolVersion version;
 	uint16 length;
-	HandshakeClientHello body;
 } TLSPlaintext;
    
 typedef struct {

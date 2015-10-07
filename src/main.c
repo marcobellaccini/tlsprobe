@@ -28,6 +28,7 @@ limitations under the License. */
 #include <errno.h>
 #include <argp.h>
 #include <config.h>
+#include <pthread.h>
 
 #include "arg.h"
 #include "tls.h"
@@ -35,6 +36,7 @@ limitations under the License. */
 #define PING_ATT_MAX 4 // number of ping attempts when using ping to set timeout
 #define TIMEOUT_DEFAULT 500 // default timeout [ms]
 #define SERVER_BUFLEN 2048 // incoming data buffer length - used in server mode
+#define CLIENT_BUFLEN 7 // incoming data buffer length - used in client mode
 #define CSF_LINE_MAX 500 // max line length for cipher suite list files
 
 /* color codes for Cipher Suite security Evaluation */
@@ -47,7 +49,18 @@ limitations under the License. */
 #define KRESET "\033[0m"
 
 
-uint24 hton24(uint32); // convert uint24 to big endian
+/* structure passed to checkSuiteSupportThr */
+typedef struct {
+	struct arguments arguments;
+	struct sockaddr_in sin;
+	struct timeval timeoutS;
+	struct timeval timeoutR;
+	CSuiteDesc *CSuitesL;
+	int selectedCS;
+	int result;
+} threadParam;
+
+uint24 hton24(uint24); // convert uint24 to big endian
 
 void fill_random (uint8*, size_t); // fills memory area with pseudo-random data
 
@@ -69,6 +82,8 @@ int checkSuiteSupport(struct arguments, struct sockaddr_in, 	// check for suppor
 																// -2 if could not understand server reply,
 																// -1 if other errors occurred
 																
+void * checkSuiteSupportThr(void*); // thread version of checkSuiteSupport
+																
 long int ping(struct sockaddr_in);	// launch ping command, parse output and return RTT in ms, return -1 if fails
 
 struct sockaddr_in getSockAddr(char *,int); // get socket address struct from host and port
@@ -83,15 +98,24 @@ int checkSuiteSecurity (CipherSuite, CSuiteEvals); // return security level of t
 
 void printSecColor (int); // print text in the right color associated with security level: green=high, cyan=good, yellow=poor, red=critical
 
+int isIpAddr(char*); // return 1 if passed string is an ip (ipv4) address, else return 0
 
-int main(int argc, char * argv[]) {
+
+
+int hostIsIp; // flag is set to 1 if passed argument was an ip address
+
+char *host; // host name
+
+
+
+int main (int argc, char * argv[]) {
 
 struct arguments arguments; // argp options struct
 struct sockaddr_in sin;
-char *host;
 int port;
 int timeout_internal; // timeout
 int selectedCS = -1; // initialize selected Cipher Suite with invalid value
+hostIsIp=1; // default
 
 
 /* Default values for options */
@@ -110,6 +134,11 @@ arguments.autotimeout=0;
 arguments.tlsVer="1.2";
 arguments.skipSSL=0;
 arguments.quiet=0;
+arguments.maxThreads=16;
+arguments.TLSExtensions=1;
+arguments.TLSSNExtension=1;
+arguments.TLSECExtension=1;
+arguments.TLSECPFExtension=1;
 
 /* Parse our arguments; every option seen by parse_opt will be reflected in arguments. */
 argp_parse (&argp, argc, argv, 0, 0, &arguments);
@@ -118,6 +147,7 @@ port=arguments.port;
 
 if (arguments.fullScanMode || arguments.cipherSuiteMode) { // if either full scan mode or cipher suite probe mode was selected, target was passed as argument
 	host=arguments.args[0];
+	hostIsIp=isIpAddr(host);
 }
 
 
@@ -326,66 +356,107 @@ if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMod
 /* full scan mode (test for support of all known cipher suites) */
 
 else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serverMode) {
+	
 	int nossTLS=0; // number of supported cipher suites - TLS
 	int nossSSL=0; // number of supported cipher suites - SSL
 	
+	/* check connectivity */
+	int sTest; //socket
+	if ((sTest=createConnection(sin, timeoutS, timeoutR)) < 0) {
+		exit(1);
+	} else {
+		shutdown(sTest, SHUT_WR); // shutdown connection
+	}
+	
 	if (!arguments.quiet)
 		printf("Scanning the server for supported cipher suites...\nCipher suites SUPPORTED by the server are:\n");
+	
+	/* set up pthread_t stuff */
+	pthread_t *tlsThreads=malloc(arguments.maxThreads*sizeof(pthread_t));
+	pthread_attr_t attr;
+	
+	/* array for values returned by threads */
+	int *returnedValues=malloc(arguments.maxThreads*sizeof(int));
+	
+	/* set thread detach attribute */
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);	
+
+	/* thread parameters (arguments) array */
+	threadParam *threadParams=malloc(arguments.maxThreads*sizeof(threadParam));
+
+	/* other thread-related stuff */
+	int tId; // thread identifier (thread index in thread array)
+	int tRet; // for storing pthread_create and pthread_join values
+	int *returnedValue=NULL; // used to get the Cipher Suite check result from the thread 
+	
+	int startCS; // index of the starting Cipher Suite in current iteration
+
 
 	/* scan for TLS */
 	printf("\rTLS:\n");
-	for (selectedCS=0; selectedCS < CSList.nol; selectedCS++) {
-		switch ( checkSuiteSupport(arguments, sin, timeoutS, timeoutR, CSList.CSArray, selectedCS) ) {
-			case 0:
-				printf("\r");
-				printSecColor(checkSuiteSecurity (CSList.CSArray[selectedCS].id, CSEvalSt));
-				printf(CSList.CSArray[selectedCS].name);
-				printf(KRESET "\n");
-				nossTLS++;
-				break;
-			case 1:
-			case 2:
-			case 3:
-				//printf("\r\t\t\t\t\t\t\t");
-				if (!arguments.quiet)
-					printf("\rTesting suite %d/%d...",selectedCS+1,CSList.nol+1);
-				break;
-			case -2:
-				printf("Could not understand server reply, aborting...\n");
-			case -1:
-			default:
-				printf("An error occurred while checking for cipher suite support\n");
+
+	/* At every iteration, start from Cipher Suite number startCS.
+	 Then create "arguments.maxThreads" different threads (if possible)
+	 in order to check support for Suites with indices from startCS
+	 up to startCS+arguments.maxThreads-1 */
+	
+	for (startCS=0; startCS < CSList.nol; startCS+=arguments.maxThreads) {
+		
+		/* start threads */
+		
+		for(tId=0, selectedCS=startCS; tId < arguments.maxThreads && selectedCS < CSList.nol; tId++, selectedCS++) {
+
+			/* initialize thread parameters */
+			//threadParams[tId]=malloc(sizeof(struct threadParam));
+	
+			threadParams[tId].arguments=arguments;
+			threadParams[tId].sin=sin;
+			threadParams[tId].timeoutS=timeoutS;
+			threadParams[tId].timeoutR=timeoutR;
+			threadParams[tId].CSuitesL=CSList.CSArray;
+			threadParams[tId].selectedCS=selectedCS;
+
+			
+			tRet = pthread_create(&(tlsThreads[tId]), &attr, checkSuiteSupportThr, (void *)&(threadParams[tId]));
+			if (tRet) {
+				printf("Error while creating threads: return code from pthread_create() is %d\n", tRet);
 				exit(1);
-
+			}
 		}
-	}
 
-	if (0 == nossTLS) {
-		printf("\r                         ");
-		printf("\rNONE\n");
-	}
+		/* join threads */
+		
+		for(tId=0, selectedCS=startCS; tId < arguments.maxThreads && selectedCS < CSList.nol; tId++, selectedCS++) {
+			
+			tRet = pthread_join(tlsThreads[tId], (void **)&returnedValue );
+			returnedValues[tId]=*returnedValue;
 
-	if (!arguments.skipSSL) {
-		/* scan for SSL */
-		printf("\r                         ");
-		printf("\n\rSSL3:\n");
-		version=version30; // force SSL version 3 instead of the selected version
-		for (selectedCS=0; selectedCS < CSListSSL.nol; selectedCS++) {
-			switch ( checkSuiteSupport(arguments, sin, timeoutS, timeoutR, CSListSSL.CSArray, selectedCS) ) {
+			free(returnedValue); // clean mem allocated by thread returning value
+		
+			if (tRet) {
+				printf("Error while joining threads: return code from pthread_join() is %d\n", tRet);
+				exit(1);
+			}
+		}
+
+		/* print results */
+		
+		for(tId=0, selectedCS=startCS; tId<arguments.maxThreads && selectedCS < CSList.nol; tId++, selectedCS++) {
+
+			switch ( returnedValues[tId] ) {
 				case 0:
 					printf("\r");
-					//printSecColor(checkSuiteSecurity (CSListSSL.CSArray[selectedCS].id, CSEvalSt));
-					printf(KRED); // SSL3 is unsafe
-					printf(CSListSSL.CSArray[selectedCS].name);
+					printSecColor(checkSuiteSecurity (CSList.CSArray[selectedCS].id, CSEvalSt));
+					printf("%s", CSList.CSArray[selectedCS].name);
 					printf(KRESET "\n");
-					nossSSL++;
+					nossTLS++;
 					break;
 				case 1:
 				case 2:
 				case 3:
-					//printf("\r\t\t\t\t\t\t\t");
 					if (!arguments.quiet)
-						printf("\rTesting suite %d/%d...",selectedCS+1,CSListSSL.nol+1);
+						printf("\rTesting suite %d/%d...",selectedCS+1,CSList.nol+1);
 					break;
 				case -2:
 					printf("Could not understand server reply, aborting...\n");
@@ -395,14 +466,124 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 					exit(1);
 
 			}
+			
+		}
+		
+		
+	}
+
+	if (0 == nossTLS) {
+		printf("\r                         ");
+		printf("\rNONE\n");
+	}
+
+	/* clean some mem after TLS scan */
+	//for(tId=0; tId < arguments.maxThreads; tId++)
+	//		free(threadParams[tId]);
+
+	if (!arguments.skipSSL) {
+		
+		/* scan for SSL */
+		
+		printf("\r                         ");
+		printf("\n\rSSL3:\n");
+		version=version30; // force SSL version 3 instead of the selected version
+
+		/* At every iteration, start from Cipher Suite number startCS.
+	 	Then create "arguments.maxThreads" different threads (if possible)
+	 	in order to check support for Suites with indices from startCS
+	 	up to startCS+arguments.maxThreads-1 */
+		
+		for (startCS=0; startCS < CSListSSL.nol; startCS+=arguments.maxThreads) {
+
+			/* start threads */
+		
+			for(tId=0, selectedCS=startCS; tId < arguments.maxThreads && selectedCS < CSListSSL.nol; tId++, selectedCS++) {
+
+				/* initialize thread parameters */
+				//threadParams[tId]=malloc(sizeof(struct threadParam));
+	
+				threadParams[tId].arguments=arguments;
+				threadParams[tId].sin=sin;
+				threadParams[tId].timeoutS=timeoutS;
+				threadParams[tId].timeoutR=timeoutR;
+				threadParams[tId].CSuitesL=CSListSSL.CSArray;
+				threadParams[tId].selectedCS=selectedCS;
+				
+				tRet = pthread_create(&(tlsThreads[tId]), &attr, checkSuiteSupportThr, (void *)&(threadParams[tId]));
+
+				if (tRet) {
+					printf("Error while creating threads: return code from pthread_create() is %d\n", tRet);
+					exit(1);
+				}
+			}
+
+
+			/* join threads */
+		
+			for(tId=0, selectedCS=startCS; tId < arguments.maxThreads && selectedCS < CSListSSL.nol; tId++, selectedCS++) {
+				
+				tRet = pthread_join(tlsThreads[tId], (void **)&returnedValue );
+				
+				returnedValues[tId]=*returnedValue;
+				
+
+				free(returnedValue); // clean mem allocated by thread returning value
+		
+				if (tRet) {
+					printf("Error while joining threads: return code from pthread_join() is %d\n", tRet);
+					exit(1);
+				}
+			}
+
+			/* print results */
+		
+			for(tId=0, selectedCS=startCS; tId<arguments.maxThreads && selectedCS < CSListSSL.nol; tId++, selectedCS++) {
+
+				switch ( returnedValues[tId] ) {
+					
+					case 0:
+						printf("\r");
+						//printSecColor(checkSuiteSecurity (CSListSSL.CSArray[selectedCS].id, CSEvalSt));
+						printf(KRED); // SSL3 is assumed to be unsafe
+						printf("%s", CSListSSL.CSArray[selectedCS].name);
+						printf(KRESET "\n");
+						nossSSL++;
+						break;
+					case 1:
+					case 2:
+					case 3:
+						if (!arguments.quiet)
+							printf("\rTesting suite %d/%d...",selectedCS+1,CSListSSL.nol+1);
+						break;
+					case -2:
+						printf("Could not understand server reply, aborting...\n");
+					case -1:
+					default:
+						printf("An error occurred while checking for cipher suite support\n");
+						exit(1);
+
+				}
+			}
 		}
 
 		if (0 == nossSSL) {
 			printf("\r                         ");
 			printf("\rNONE\n");
-		}
+		}		
+
+		/* clean some mem after SSL scan */
+		//for(tId=0; tId < arguments.maxThreads; tId++)
+		//		free(threadParams[tId]);
 		
 	}
+
+
+	/* common memory cleaning for threads-related stuff */
+	
+	free(tlsThreads);
+	free(returnedValues);
+	free(threadParams);
 	
 	
 	
@@ -436,13 +617,16 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 	int len; // length of incoming data
 	uint8 buf[SERVER_BUFLEN]; // buffer for incoming data
 	
+	// initialize buf by filling it with zeros
+	memset(buf,0,SERVER_BUFLEN);
+	
 	if (!arguments.quiet)
 		printf("Listening for TLS connections on TCP port %d...\n", port);
 	
 	
 	/* wait for incoming connection */
 	//while (1) {
-		if ((new_s = accept(s, (struct sockaddr *)&sin, &len)) < 0) {
+		if ((new_s = accept(s, NULL, NULL)) < 0) {
 			perror("tlsprobe: accept");
 			printf("An error occurred while processing incoming connection, aborting...\n");
 			exit(1);
@@ -468,33 +652,33 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 				goto bad_creq;
 			
 			/* ...if so, continue parsing it... */
-			
-			tlsPT.body.msg_type=(uint8)(*(buf+5));
+			HandshakeClientHello tlsHCH;
+			tlsHCH.msg_type=(uint8)(*(buf+5));
 			
 			// skip length -- tlsPT.body.length=(uint24)(*(buf+6));
 			
 			/* check if ClientHello message was received */
-			if (HT_CLIENT_HELLO!=tlsPT.body.msg_type)
+			if (HT_CLIENT_HELLO!=tlsHCH.msg_type)
 				goto bad_creq;
 				
 			/* ...if so, continue parsing it... */
-			
-			tlsPT.body.body.client_version.major=(uint8)(*(buf+9));
-			tlsPT.body.body.client_version.minor=(uint8)(*(buf+10));
+			ClientHello tlsCH;
+			tlsCH.client_version.major=(uint8)(*(buf+9));
+			tlsCH.client_version.minor=(uint8)(*(buf+10));
 
-			if (3==tlsPT.body.body.client_version.major && 0==tlsPT.body.body.client_version.minor) // if SSL3
+			if (3==tlsCH.client_version.major && 0==tlsCH.client_version.minor) // if SSL3
 				isSSL=1;
 			
-			tlsPT.body.body.random.gmt_unix_time=ntohl((uint32)(*(buf+11)));
+			tlsCH.random.gmt_unix_time=ntohl((uint32)(*(buf+11)));
 			
 			// skip random bytes (28 bytes) - 11+4+28=43
 			
-			tlsPT.body.body.session_id.length=(uint8)(*(buf+43));
-			//printf("sid_len:%d\n",tlsPT.body.body.session_id.length);
+			tlsCH.session_id=(uint8)(*(buf+43));
+			//printf("sid_len:%d\n",tlsCH.session_id.length);
 			
-			// skip session id itself 43+1+tlsPT.body.body.session_id.length
+			// skip session id itself 43+1+tlsCH.session_id.length
 			
-			tlsPT.body.body.cipher_suites.length=((uint16)(*(buf+43+2+tlsPT.body.body.session_id.length)));
+			tlsCH.cipher_suites_length=((uint16)(*(buf+43+2+tlsCH.session_id)));
 			
 
 			/* print offered cipher suite list */
@@ -510,11 +694,11 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 				}
 				printf("ClientHello was received, Cipher Suites offered by the client are (in order of preference):\n");
 			}
-			//printf("%d\n",tlsPT.body.body.cipher_suites.length);
+			//printf("%d\n",tlsCH.cipher_suites.length);
 			
-			for (ocs_idx=0;ocs_idx<tlsPT.body.body.cipher_suites.length/2;ocs_idx++) { // 2 bytes per cipher suite
-				cs[0] = (uint8)(*(buf+43+1+tlsPT.body.body.session_id.length+2+2*ocs_idx));
-				cs[1] = (uint8)(*(buf+43+1+tlsPT.body.body.session_id.length+3+2*ocs_idx));
+			for (ocs_idx=0;ocs_idx<tlsCH.cipher_suites_length/2;ocs_idx++) { // 2 bytes per cipher suite
+				cs.a = (uint8)(*(buf+43+1+tlsCH.session_id+2+2*ocs_idx));
+				cs.b = (uint8)(*(buf+43+1+tlsCH.session_id+3+2*ocs_idx));
 				
 				//printf("%d %d\n",cs[0],cs[1]);
 				if (!isSSL)
@@ -534,7 +718,7 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 					
 					printf(KRESET);
 				}
-				else if (0x00==cs[0] && 0xff==cs[1]) { // this handles TLS_EMPTY_RENEGOTIATION_INFO_SCSV
+				else if (0x00==cs.a && 0xff==cs.b) { // this handles TLS_EMPTY_RENEGOTIATION_INFO_SCSV
 
 					printf(KWHT);
 					
@@ -547,7 +731,7 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 					printf(KRESET);
 
 				}
-				else if (0x56==cs[0] && 0x00==cs[1]) { // this handles TLS_FALLBACK_SCSV
+				else if (0x56==cs.a && 0x00==cs.b) { // this handles TLS_FALLBACK_SCSV
 					printf(KWHT);
 					
 					if (!isSSL) {
@@ -559,12 +743,12 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 					printf(KRESET);
 				}
 				else {
-					printf("An unknown Cipher Suite was received:%02x %02x.\n", cs[0], cs[1]);
+					printf("An unknown Cipher Suite was received:%02x %02x.\n", cs.a, cs.b);
 				}
 			}
 			
 			if (!arguments.quiet) {
-				printf("Finished, %d Cipher Suites were offered by the client.\n", tlsPT.body.body.cipher_suites.length/2);
+				printf("Finished, %d Cipher Suites were offered by the client.\n", tlsCH.cipher_suites_length/2);
 				printf("Legend: " KCYN "SAFER " KGRN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "SIGNAL/UNKNOWN\n" KRESET);
 			}
 			
@@ -597,17 +781,18 @@ free(CSListSSL.CSArray);
 free(CSEvalSt.modern);
 free(CSEvalSt.intermediate);
 free(CSEvalSt.old);
+free(CSEvalSt.all);
 
 return 0; // return if successful
 
 }
 
 
-uint24 hton24(uint32 in) {
+uint24 hton24(uint24 in) {
 	uint24 out;
-	out.lsb=(in)&0xff;
-	out.nsb=(in>>8)&0xff;
-	out.msb=(in>>16)&0xff;
+	out.lsb=in.msb;
+	out.nsb=in.nsb;
+	out.msb=in.lsb;
 	return out;
 }
 
@@ -634,7 +819,7 @@ int searchCSbyName(char* name,CSuiteDesc* CSL, int CSL_size) {
 int searchCSbyID(CipherSuite id,CSuiteDesc* CSL, int CSL_size) {
 	int i;
 	for(i=0;i<CSL_size;i++) {
-		if (id[0]==CSL[i].id[0] && id[1]==CSL[i].id[1]){
+		if (id.a==CSL[i].id.a && id.b==CSL[i].id.b){
 			return i; // Cipher Suite found at element i
 		}
 	}
@@ -716,10 +901,25 @@ int passiveOpenConnection(int port) {
 	
 }
 
+void *checkSuiteSupportThr(void* params) {
+	
+	//struct threadParam *thrPar=params;
+	
+	int *retVal=malloc(sizeof(int));
+	
+	*retVal=checkSuiteSupport(((threadParam*)params)->arguments, ((threadParam*)params)->sin, ((threadParam*)params)->timeoutS, ((threadParam*)params)->timeoutR, ((threadParam*)params)->CSuitesL, ((threadParam*)params)->selectedCS);
+
+	//printf("RetVAL:%d\n",*retVal);
+	pthread_exit((void*)retVal);
+	
+}
+
+
+
 int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct timeval timeoutS, struct timeval timeoutR, CSuiteDesc *CSuitesL, int selectedCS) {
 	
 	/* pre-build TLS Alert message (used to tear down the connection after Server Hello(s) ) */
-
+	
 	Alert alertMsg;
 	alertMsg.level=AL_FATAL;
 	alertMsg.description=AD_HANDSHAKE_FAILURE;
@@ -737,48 +937,256 @@ int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct
 	tlsPTAL.body=alertMsg;
 	
 	
-	/* build a ClientHello message */
+	/* TLS message set-up phase */
 
-	ClientHello myClientHello;
-	myClientHello.client_version=version;
+	ClientHello myCH;
+	myCH.client_version=version;
 
 	time_t tv;
 	tv=time(NULL);
 
 	if (arguments.truetime) { // if user requested true timestamp to be used in TLS messages
-		myClientHello.random.gmt_unix_time=htonl((uint32) tv); // timestamp converted to big endian
+		myCH.random.gmt_unix_time=(uint32) tv; // timestamp converted to big endian
 	} else {
-		fill_random((uint8*)&(myClientHello.random.gmt_unix_time), 32); // else use random data (to avoid clock drift fingerprinting - https://bugzilla.mozilla.org/show_bug.cgi?id=967923 )
+		fill_random((uint8*)&(myCH.random.gmt_unix_time), 32); // else use random data (to avoid clock drift fingerprinting - https://bugzilla.mozilla.org/show_bug.cgi?id=967923 )
 	}
 
-	fill_random(myClientHello.random.random_bytes, 28); // fill the random nonce
+	fill_random(myCH.random.random_bytes, 28); // fill the random nonce
 
-	myClientHello.session_id.length=0x0; // no session id
-	myClientHello.cipher_suites.length=0x0200; // 1 cipher suite (little endian)
-	//myClientHello.cipher_suites.suite1[0]=TLS_DHE_RSA_WITH_AES_128_CBC_SHA[0];
-	//myClientHello.cipher_suites.suite1[1]=TLS_DHE_RSA_WITH_AES_128_CBC_SHA[1];
-	//myClientHello.cipher_suites.suite1[0]=0xc0;
-	//myClientHello.cipher_suites.suite1[1]=0x2f;
-	myClientHello.cipher_suites.suite1[0]=CSuitesL[selectedCS].id[0];
-	myClientHello.cipher_suites.suite1[1]=CSuitesL[selectedCS].id[1];
-	//printf("Trying with suite %s\n",CSuitesL[selectedCS].name);
-	myClientHello.compression_methods=0x0001; // 1 compression method: no compression (little endian)
-	//myClientHello.extensions_length=0x00; // not using TLS extensions
-
+	myCH.session_id=0x0; // no session id
+	myCH.cipher_suites_length=1*sizeof(CipherSuite); // 1 cipher suite (little endian)
+	myCH.cipher_suites=malloc(1*sizeof(CipherSuite));
+	myCH.cipher_suites->a=CSuitesL[selectedCS].id.a;
+	myCH.cipher_suites->b=CSuitesL[selectedCS].id.b;
+	myCH.compression_methods_length=1*sizeof(CompressionMethod); // 1 compression method: no compression
+	myCH.compression_methods=malloc(1*sizeof(CompressionMethod));
+	myCH.compression_methods[0]=CM_NO_COMPRESSION;
+	
+	/* Determine the number of TLS Extensions to use and set-up Extensions*/
+	int noTLSExt=0;
+	int csIsECC=0;
+	Extension snExt;
+	ServerNameExData sNameData;
+	Extension ecExt;
+	Extension ecPFExt;
+	ECExData ecData;
+	ECPFExData ecPFData;
+	
+	myCH.extensions_length=0;
+	
+	if (arguments.TLSExtensions) {
+		/* server_name extension */
+		if (arguments.TLSSNExtension && !hostIsIp) {
+			noTLSExt++;
+			sNameData.name=host;
+			sNameData.name_length=strlen(host);
+			sNameData.name_type=TLS_EXT_SERVER_NAME_HOSTNAME;
+			sNameData.list_length=sNameData.name_length+sizeof(sNameData.name_length)+sizeof(sNameData.name_type);
+			
+			snExt.length=sNameData.list_length+sizeof(sNameData.list_length);
+			snExt.type=TLS_EXT_SERVER_NAME;
+			
+			myCH.extensions_length+=snExt.length+sizeof(snExt.length)+sizeof(snExt.type); // update ClientHello extensions length
+		}
+		/* if selectedCS is ECC-related... */
+		csIsECC=(NULL!=strstr(CSuitesL[selectedCS].name,"ECDH") || NULL!=strstr(CSuitesL[selectedCS].name,"ECDSA"));
+		if (csIsECC) {
+			/* elliptic_curves extension */
+			if (arguments.TLSECExtension) {
+				noTLSExt++;
+				
+				ecData.curves=malloc(35*sizeof(uint16));
+				
+				// beware, you fixed 35 elements!!!
+				// fill curve list with all the known curves (to be improved...)
+				uint16 idx;
+				for (idx=0;idx<28; idx++) {
+					ecData.curves[idx]=idx+1;
+				}
+				ecData.curves[28]=256;
+				ecData.curves[29]=257;
+				ecData.curves[30]=258;
+				ecData.curves[31]=259;
+				ecData.curves[32]=260;
+				ecData.curves[33]=65281;
+				ecData.curves[34]=65282;
+				
+				 
+				ecData.ECLength=35*sizeof(uint16);
+				
+				ecExt.type=TLS_EXT_EC;
+				ecExt.length=ecData.ECLength+sizeof(ecData.ECLength);
+				
+				myCH.extensions_length+=ecExt.length+sizeof(ecExt.length)+sizeof(ecExt.type); // update ClientHello extensions length
+				
+			}
+			
+			/* elliptic_curves point formats extension */
+			if (arguments.TLSECPFExtension) {
+				noTLSExt++;
+				
+				ecPFData.formats=malloc(1*sizeof(uint8));
+				
+				//beware, you fixed 1 element!!!
+				ecPFData.formats[0]=TLS_EXT_EC_PF_UN;
+				 
+				ecPFData.formats_length=1*sizeof(uint8);
+				
+				ecPFExt.type=TLS_EXT_EC_PF;
+				ecPFExt.length=ecPFData.formats_length+sizeof(ecPFData.formats_length);
+				
+				myCH.extensions_length+=ecPFExt.length+sizeof(ecPFExt.length)+sizeof(ecPFExt.type); // update ClientHello extensions length
+				
+			}
+			
+			
+		}
+	}
+	
+	
+	size_t actCHSize=sizeof(myCH.client_version)+sizeof(myCH.random)+sizeof(myCH.session_id)+sizeof(myCH.cipher_suites_length)+sizeof(*(myCH.cipher_suites))+sizeof(myCH.compression_methods_length)+sizeof(*(myCH.compression_methods)); // actual Client Hello size
+	
+	
+	if (noTLSExt>0)
+		actCHSize+=sizeof(myCH.extensions_length)+myCH.extensions_length;
+	
+	
 	HandshakeClientHello myHandShakeCH;
 	myHandShakeCH.msg_type=HT_CLIENT_HELLO; //client_hello
-	//printf("Size:%d\n",(int32_t)sizeof(myClientHello));
-	myHandShakeCH.length=hton24((uint32)sizeof(myClientHello));
-	myHandShakeCH.body=myClientHello;
+	myHandShakeCH.length.lsb=(actCHSize >> 16)&0xff;
+	myHandShakeCH.length.nsb=(actCHSize >> 8)&0xff;
+	myHandShakeCH.length.msb=(actCHSize)&0xff;
 
 	TLSPlaintext tlsPTCH;
 	tlsPTCH.type=CT_HANDSHAKE; // handshake message
 	tlsPTCH.version=version;
-	tlsPTCH.length=htons(sizeof(myHandShakeCH));
-	tlsPTCH.body=myHandShakeCH;
+	tlsPTCH.length=sizeof(myHandShakeCH)+actCHSize;
+	
+	
+	/* endianess conversions */
+	
+	tlsPTCH.length=htons(tlsPTCH.length);
+	myHandShakeCH.length=hton24(myHandShakeCH.length);
+	myCH.random.gmt_unix_time=htonl(myCH.random.gmt_unix_time);
+	myCH.cipher_suites_length=htons(myCH.cipher_suites_length);
+	
+	if (noTLSExt>0) {
+		myCH.extensions_length=htons(myCH.extensions_length);
+		
+		if (arguments.TLSSNExtension && !hostIsIp) {
+			snExt.type=htons(snExt.type);
+			snExt.length=htons(snExt.length);
+			sNameData.name_type=htons(sNameData.name_type);
+			sNameData.list_length=htons(sNameData.list_length);
+		}
+		
+		if (csIsECC) {
+			if (arguments.TLSECExtension) {
+				ecExt.type=htons(ecExt.type);
+				ecExt.length=htons(ecExt.length);
+				ecData.ECLength=htons(ecData.ECLength);
+				int idx;
+				for (idx=0; idx<ntohs(ecData.ECLength)/sizeof(uint16); idx++) {
+					ecData.curves[idx]=htons(ecData.curves[idx]);
+				}
+				
+			}
+			if (arguments.TLSECPFExtension) {
+				ecPFExt.type=htons(ecPFExt.type);
+				ecPFExt.length=htons(ecPFExt.length);
+			}
+		}
+		
+		
+	}
+	
+	
+	/* TLS message build-up phase */
+	
+	size_t msg_size=sizeof(TLSPlaintext)+sizeof(HandshakeClientHello)+actCHSize;
+	opaque* tlsMsg=malloc(msg_size);
+	opaque* mloc=tlsMsg; // pointer to the mem area to fill
+	
+	memcpy(mloc,&(tlsPTCH.type),sizeof(tlsPTCH.type));
+	mloc+=sizeof(tlsPTCH.type);
+	memcpy(mloc,&(tlsPTCH.version),sizeof(tlsPTCH.version));
+	mloc+=sizeof(tlsPTCH.version);
+	memcpy(mloc,&(tlsPTCH.length),sizeof(tlsPTCH.length));
+	mloc+=sizeof(tlsPTCH.length);
+	
+	memcpy(mloc,&(myHandShakeCH.msg_type),sizeof(myHandShakeCH.msg_type));
+	mloc+=sizeof(myHandShakeCH.msg_type);
+	memcpy(mloc,&(myHandShakeCH.length),sizeof(myHandShakeCH.length));
+	mloc+=sizeof(myHandShakeCH.length);
+	
+	memcpy(mloc,&(myCH.client_version),sizeof(myCH.client_version));
+	mloc+=sizeof(myCH.client_version);
+	memcpy(mloc,&(myCH.random),sizeof(myCH.random));
+	mloc+=sizeof(myCH.random);
+	memcpy(mloc,&(myCH.session_id),sizeof(myCH.session_id));
+	mloc+=sizeof(myCH.session_id);
+	memcpy(mloc,&(myCH.cipher_suites_length),sizeof(myCH.cipher_suites_length));
+	mloc+=sizeof(myCH.cipher_suites_length);
+	memcpy(mloc,&(myCH.cipher_suites[0]),sizeof(myCH.cipher_suites[0]));
+	mloc+=sizeof(myCH.cipher_suites[0]);
+	memcpy(mloc,&(myCH.compression_methods_length),sizeof(myCH.compression_methods_length));
+	mloc+=sizeof(myCH.compression_methods_length);
+	memcpy(mloc,&(myCH.compression_methods[0]),sizeof(myCH.compression_methods[0]));
+	mloc+=sizeof(myCH.compression_methods[0]);
+	
+	
+	if (noTLSExt>0) {
+		memcpy(mloc,&(myCH.extensions_length),sizeof(myCH.extensions_length));
+		mloc+=sizeof(myCH.extensions_length);
+		/* server_name extension */
+		if (arguments.TLSSNExtension && !hostIsIp) {
+			memcpy(mloc,&(snExt.type),sizeof(snExt.type));
+			mloc+=sizeof(snExt.type);
+			memcpy(mloc,&(snExt.length),sizeof(snExt.length));
+			mloc+=sizeof(snExt.length);
+			memcpy(mloc,&(sNameData.list_length),sizeof(sNameData.list_length));
+			mloc+=sizeof(sNameData.list_length);
+			memcpy(mloc,&(sNameData.name_type),sizeof(sNameData.name_type));
+			mloc+=sizeof(sNameData.name_type);
+			memcpy(mloc,&(sNameData.name_length),sizeof(sNameData.name_length));
+			mloc+=sizeof(sNameData.name_length);
+			memcpy(mloc,sNameData.name,sNameData.name_length); // can do this because sNameData.name_length is uint8 - no endianess problems
+			mloc+=sNameData.name_length;
+		}
+		
+		/* ecc extensions */
+		if (csIsECC) {
+			if (arguments.TLSECExtension) {
+				memcpy(mloc,&(ecExt.type),sizeof(ecExt.type));
+				mloc+=sizeof(ecExt.type);
+				memcpy(mloc,&(ecExt.length),sizeof(ecExt.length));
+				mloc+=sizeof(ecExt.length);
+				memcpy(mloc,&(ecData.ECLength),sizeof(ecData.ECLength));
+				mloc+=sizeof(ecData.ECLength);
+				memcpy(mloc,ecData.curves,ntohs(ecData.ECLength));
+				mloc+=ntohs(ecData.ECLength);
+			}
+			if (arguments.TLSECPFExtension) {
+				memcpy(mloc,&(ecPFExt.type),sizeof(ecPFExt.type));
+				mloc+=sizeof(ecPFExt.type);
+				memcpy(mloc,&(ecPFExt.length),sizeof(ecPFExt.length));
+				mloc+=sizeof(ecPFExt.length);
+				memcpy(mloc,&(ecPFData.formats_length),sizeof(ecPFData.formats_length));
+				mloc+=sizeof(ecPFData.formats_length);
+				memcpy(mloc,ecPFData.formats,ecPFData.formats_length);
+				mloc+=ecPFData.formats_length;
+			}
+			
+		}
+		
+		
+		
+	}
+	
+	
 	
 	if (arguments.printMessage) { // let's print ClientHello before sending it
-		printMem(&tlsPTCH, sizeof(tlsPTCH));
+		printMem(tlsMsg, msg_size);
 	}
 
 
@@ -788,12 +1196,31 @@ int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct
 		return -1;
 	}
 	
-	uint8 rbuf[7]; // buffer for incoming data
+	uint8 rbuf[CLIENT_BUFLEN]; // buffer for incoming data
 	int timeOutReached=0; // timeout flag initialization
 
-	send(s, &tlsPTCH, sizeof(tlsPTCH), 0); // send ClientHello
+	send(s, tlsMsg, msg_size, 0); // send ClientHello
 
 
+	/* free memory from ClientHello-related elements */
+	
+	free(tlsMsg);
+	free(myCH.cipher_suites);
+	free(myCH.compression_methods);
+	
+	if (noTLSExt>0) {
+		if (csIsECC) {
+			if (arguments.TLSECExtension) {
+				free(ecData.curves);
+			}
+			if (arguments.TLSECPFExtension) {
+				free(ecPFData.formats);
+			}
+		}
+	}
+
+	// initialize rbuf by filling it with zeros
+	memset(rbuf,0,CLIENT_BUFLEN);
 
 	// get the initial part of the reply
 	ssize_t received=recv(s, rbuf, sizeof(rbuf), 0);
@@ -905,29 +1332,28 @@ CSuiteList loadCSList(char* filePath) {
 	CSList.nol=0;
 	char line[CSF_LINE_MAX];
 	CSuiteDesc actCS;
+	int a32,b32; // these are to avoid overflows with sscanf
 	
 	/* open IANA Cipher Suites List */
 	CS_file = fopen(filePath,"r");
 
 	if (NULL == CS_file) {
 		printf("Error while opening Cipher Suites List file:\nplease make sure tls-parameters-4.csv and ssl-parameters.csv are in the default directory (/usr/local/share/tlsprobe/) or specify their path through the -f and -g options\n");
-		printf("For TLS, you can get an up-to-date CSV file from: http://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml\n");
+		// this would result in ChaCha Suites not being discovered:
+		// printf("For TLS, you can get an up-to-date CSV file from: http://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml\n");
 		return CSList; // which was initialized as invalid
 	}
 
 	/* parse IANA Cipher Suites List */
 
-
-	CSuiteDesc *CSuitesL=NULL; // initialize Cipher Suites List pointer
-
-
-	int nol=0; // number of valid lines in the file
 	while (!feof(CS_file)) {
 		fgets(line, sizeof(line), CS_file);
-		if (3==sscanf(line,"\"0x%02x,0x%02x\",%[^,],%*s", (unsigned int *)&actCS.id[0], (unsigned int *)&actCS.id[1], &actCS.name)) { // if a valid suite was parsed
-			nol++;
-			CSuitesL=realloc(CSuitesL,nol*sizeof(CSuiteDesc));
-			CSuitesL[nol-1]=actCS;
+		if (3==sscanf(line,"\"0x%02x,0x%02x\",%99[^,\n],%*s", &a32, &b32, (actCS.name))) { // if a valid suite was parsed
+			actCS.id.a=(uint8)a32;
+			actCS.id.b=(uint8)b32;
+			CSList.nol++;
+			CSList.CSArray=realloc(CSList.CSArray,CSList.nol*sizeof(CSuiteDesc));
+			CSList.CSArray[CSList.nol-1]=actCS;
 		}
 	}
 
@@ -936,9 +1362,6 @@ CSuiteList loadCSList(char* filePath) {
 	fclose(CS_file);
 	
 	/* success, return valid data */
-	
-	CSList.CSArray=CSuitesL;
-	CSList.nol=nol;
 	
 	return CSList;
 	
@@ -1001,6 +1424,7 @@ CSuiteEvals loadCSEvals(char* filePath) {
 
 	/* parse Cipher Suites Evaluation file */
 	char line[CSF_LINE_MAX];
+	int a32,b32; // these are used to avoid overflow with sscanf and %02x
 	uint8 a,b;
 
 	/* search for <modern> tag */
@@ -1012,13 +1436,15 @@ CSuiteEvals loadCSEvals(char* filePath) {
 		fgets(line, sizeof(line), CSE_file);
 
 		if (NULL != strstr(line,"<modern>")) {
-			while (NULL == strstr(line,"</modern>") && !feof(CSE_file)) {
+			while ((NULL == strstr(line,"</modern>")) && !feof(CSE_file)) {
 
-				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a, &b)) {
+				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a32, &b32)) {
+					a=(uint8)a32; // this is to avoid overflow (see a32 and b32 declarations)
+					b=(uint8)b32;
 					CSEList.modern_size++;
 					CSEList.modern=realloc(CSEList.modern,CSEList.modern_size*sizeof(CipherSuite));
-					(*(CSEList.modern+CSEList.modern_size-1))[0]=a;
-					(*(CSEList.modern+CSEList.modern_size-1))[1]=b;
+					(*(CSEList.modern+CSEList.modern_size-1)).a=a;
+					(*(CSEList.modern+CSEList.modern_size-1)).b=b;
 				}
 
 				fgets(line, sizeof(line), CSE_file);
@@ -1028,11 +1454,13 @@ CSuiteEvals loadCSEvals(char* filePath) {
 		else if (NULL != strstr(line,"<intermediate>")) {
 			while (NULL == strstr(line,"</intermediate>") && !feof(CSE_file)) {
 
-				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a, &b)) {
+				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a32, &b32)) {
+					a=(uint8)a32; // this is to avoid overflow (see a32 and b32 declarations)
+					b=(uint8)b32;
 					CSEList.intermediate_size++;
 					CSEList.intermediate=realloc(CSEList.intermediate,CSEList.intermediate_size*sizeof(CipherSuite));
-					(*(CSEList.intermediate+CSEList.intermediate_size-1))[0]=a;
-					(*(CSEList.intermediate+CSEList.intermediate_size-1))[1]=b;
+					(*(CSEList.intermediate+CSEList.intermediate_size-1)).a=a;
+					(*(CSEList.intermediate+CSEList.intermediate_size-1)).b=b;
 				}
 
 				fgets(line, sizeof(line), CSE_file);
@@ -1042,11 +1470,13 @@ CSuiteEvals loadCSEvals(char* filePath) {
 		else if (NULL != strstr(line,"<old>")) {
 			while (NULL == strstr(line,"</old>") && !feof(CSE_file)) {
 
-				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a, &b)) {
+				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a32, &b32)) {
+					a=(uint8)a32; // this is to avoid overflow (see a32 and b32 declarations)
+					b=(uint8)b32;
 					CSEList.old_size++;
 					CSEList.old=realloc(CSEList.old,CSEList.old_size*sizeof(CipherSuite));
-					(*(CSEList.old+CSEList.old_size-1))[0]=a;
-					(*(CSEList.old+CSEList.old_size-1))[1]=b;
+					(*(CSEList.old+CSEList.old_size-1)).a=a;
+					(*(CSEList.old+CSEList.old_size-1)).b=b;
 				}
 
 				fgets(line, sizeof(line), CSE_file);
@@ -1056,11 +1486,13 @@ CSuiteEvals loadCSEvals(char* filePath) {
 		else if (NULL != strstr(line,"<all>")) {
 			while (NULL == strstr(line,"</all>") && !feof(CSE_file)) {
 
-				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a, &b)) {
+				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a32, &b32)) {
+					a=(uint8)a32; // this is to avoid overflow (see a32 and b32 declarations)
+					b=(uint8)b32;
 					CSEList.all_size++;
 					CSEList.all=realloc(CSEList.all,CSEList.all_size*sizeof(CipherSuite));
-					(*(CSEList.all+CSEList.all_size-1))[0]=a;
-					(*(CSEList.all+CSEList.all_size-1))[1]=b;
+					(*(CSEList.all+CSEList.all_size-1)).a=a;
+					(*(CSEList.all+CSEList.all_size-1)).b=b;
 				}
 
 				fgets(line, sizeof(line), CSE_file);
@@ -1092,8 +1524,8 @@ int scanSuiteSecList (CipherSuite CS, CipherSuite *CSL, int size) {
 	unsigned int i;
 
 	for (i=0; i<size;i++) {
-		//printf("%d %d, %d %d\n",CS[0],*(CSL+i)[0],CS[1],(*(CSL+i))[1]);
-		if (CS[0]==*(CSL+i)[0] && CS[1]==(*(CSL+i))[1])
+	//printf("%d %d, %d %d\n",CS.a,(*(CSL+i)).a,CS.b,(*(CSL+i)).b);
+		if (CS.a==(*(CSL+i)).a && CS.b==(*(CSL+i)).b)
 			return 0;
 	}
 
@@ -1143,4 +1575,17 @@ void printSecColor(int secLevel) {
 			exit(1);
 
 	}
+}
+
+int isIpAddr(char* str) {
+	int a,b,c,d;
+	int ngot=0;
+	
+	ngot=sscanf(str,"%d.%d.%d.%d",&a,&b,&c,&d);
+	
+	if (4==ngot && a<256 && b<256 && c<256 && d<256)
+		return 1;
+	else
+		return 0;
+		
 }

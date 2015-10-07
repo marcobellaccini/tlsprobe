@@ -44,6 +44,11 @@ static struct argp_option options[] = {
   {"server-mode",   'S', 0, 0, "SERVER MODE: listen for incoming connections and list offered Cipher Suites when a ClientHello message is received" },
   {"quiet",   'q', 0, 0, "Be quiet, printing only the results (and a small subset of messages)." },
   {"skip-ssl",   'j', 0, 0, "Skip SSL3 scan when performing a full-scan." },
+  {"disable-extensions",   'd', 0, 0, "Disable all TLS Extensions." },
+  {"disable-server-name",   'n', 0, 0, "Avoid using TLS server_name Extension." },
+  {"disable-ec",   'x', 0, 0, "Avoid using TLS elliptic_curves Extension." },
+  {"disable-ec-pf",   'y', 0, 0, "Avoid using TLS elliptic_curves_point_formats Extension." },
+  {"thread-num",   'w', "TNUM", 0, "Set maximum number of threads to TNUM when performing a full-scan (default is 16)." },
   { 0 }
 };
 
@@ -51,7 +56,7 @@ static struct argp_option options[] = {
 struct arguments
 {
   char *args[ARGNUM];                // host and port
-  int truetime, port, printMessage, fullScanMode, timeout, autotimeout, cipherSuiteMode, serverMode, quiet, skipSSL;
+  int truetime, port, printMessage, fullScanMode, timeout, autotimeout, cipherSuiteMode, serverMode, quiet, skipSSL, maxThreads, TLSExtensions, TLSSNExtension, TLSECExtension, TLSECPFExtension;
   char *CS_file, *CS_eval_file, *CS_file_SSL;
   char *cipherSuite;
   char *tlsVer;
@@ -111,6 +116,21 @@ parse_opt (int key, char *arg, struct argp_state *state)
 	break;
 	case 'j':
       arguments->skipSSL = 1;
+	break;
+	case 'd':
+      arguments->TLSExtensions = 0;
+	break;
+	case 'n':
+      arguments->TLSSNExtension = 0;
+	break;
+	case 'x':
+      arguments->TLSECExtension = 0;
+	break;
+	case 'y':
+      arguments->TLSECPFExtension = 0;
+	break;
+	case 'w':
+      arguments->maxThreads = atoi(arg);
 	break;
 
     case ARGP_KEY_ARG:
