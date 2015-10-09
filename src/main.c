@@ -369,7 +369,7 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 	}
 	
 	if (!arguments.quiet)
-		printf("Scanning the server for supported cipher suites...\nCipher suites SUPPORTED by the server are:\n");
+		printf("Scanning server for supported cipher suites...\nCipher suites SUPPORTED by the server are:\n");
 	
 	/* set up pthread_t stuff */
 	pthread_t *tlsThreads=malloc(arguments.maxThreads*sizeof(pthread_t));
@@ -416,7 +416,7 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 			threadParams[tId].timeoutR=timeoutR;
 			threadParams[tId].CSuitesL=CSList.CSArray;
 			threadParams[tId].selectedCS=selectedCS;
-
+			
 			
 			tRet = pthread_create(&(tlsThreads[tId]), &attr, checkSuiteSupportThr, (void *)&(threadParams[tId]));
 			if (tRet) {
@@ -456,7 +456,7 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 				case 2:
 				case 3:
 					if (!arguments.quiet)
-						printf("\rTesting suite %d/%d...",selectedCS+1,CSList.nol+1);
+						printf("\rTesting suite %d/%d...",selectedCS+1,CSList.nol);
 					break;
 				case -2:
 					printf("Could not understand server reply, aborting...\n");
@@ -554,7 +554,7 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 					case 2:
 					case 3:
 						if (!arguments.quiet)
-							printf("\rTesting suite %d/%d...",selectedCS+1,CSListSSL.nol+1);
+							printf("\rTesting suite %d/%d...",selectedCS+1,CSListSSL.nol);
 						break;
 					case -2:
 						printf("Could not understand server reply, aborting...\n");
@@ -1347,8 +1347,7 @@ CSuiteList loadCSList(char* filePath) {
 	/* parse IANA Cipher Suites List */
 
 	while (!feof(CS_file)) {
-		fgets(line, sizeof(line), CS_file);
-		if (3==sscanf(line,"\"0x%02x,0x%02x\",%99[^,\n],%*s", &a32, &b32, (actCS.name))) { // if a valid suite was parsed
+		if (NULL != fgets(line, sizeof(line), CS_file) && 3==sscanf(line,"\"0x%02x,0x%02x\",%99[^,\n],%*s", &a32, &b32, (actCS.name))) { // if a valid suite was parsed
 			actCS.id.a=(uint8)a32;
 			actCS.id.b=(uint8)b32;
 			CSList.nol++;
@@ -1433,71 +1432,79 @@ CSuiteEvals loadCSEvals(char* filePath) {
 	while(!feof(CSE_file))
 	{
 		
-		fgets(line, sizeof(line), CSE_file);
-
-		if (NULL != strstr(line,"<modern>")) {
-			while ((NULL == strstr(line,"</modern>")) && !feof(CSE_file)) {
-
-				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a32, &b32)) {
-					a=(uint8)a32; // this is to avoid overflow (see a32 and b32 declarations)
-					b=(uint8)b32;
-					CSEList.modern_size++;
-					CSEList.modern=realloc(CSEList.modern,CSEList.modern_size*sizeof(CipherSuite));
-					(*(CSEList.modern+CSEList.modern_size-1)).a=a;
-					(*(CSEList.modern+CSEList.modern_size-1)).b=b;
-				}
-
-				fgets(line, sizeof(line), CSE_file);
-			}
+		if (NULL != fgets(line, sizeof(line), CSE_file)) {
 			
-		}
-		else if (NULL != strstr(line,"<intermediate>")) {
-			while (NULL == strstr(line,"</intermediate>") && !feof(CSE_file)) {
+			if (NULL != strstr(line,"<modern>")) {
+				while ((NULL == strstr(line,"</modern>")) && !feof(CSE_file)) {
 
-				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a32, &b32)) {
-					a=(uint8)a32; // this is to avoid overflow (see a32 and b32 declarations)
-					b=(uint8)b32;
-					CSEList.intermediate_size++;
-					CSEList.intermediate=realloc(CSEList.intermediate,CSEList.intermediate_size*sizeof(CipherSuite));
-					(*(CSEList.intermediate+CSEList.intermediate_size-1)).a=a;
-					(*(CSEList.intermediate+CSEList.intermediate_size-1)).b=b;
+					if (2==sscanf(line,"0x%02x,0x%02x%*s", &a32, &b32)) {
+						a=(uint8)a32; // this is to avoid overflow (see a32 and b32 declarations)
+						b=(uint8)b32;
+						CSEList.modern_size++;
+						CSEList.modern=realloc(CSEList.modern,CSEList.modern_size*sizeof(CipherSuite));
+						(*(CSEList.modern+CSEList.modern_size-1)).a=a;
+						(*(CSEList.modern+CSEList.modern_size-1)).b=b;
+					}
+
+					if ( NULL == fgets(line, sizeof(line), CSE_file) )
+						printf("Error while loading CS eval file.\n");
+						
 				}
-
-				fgets(line, sizeof(line), CSE_file);
-			}
 			
-		}
-		else if (NULL != strstr(line,"<old>")) {
-			while (NULL == strstr(line,"</old>") && !feof(CSE_file)) {
+			}
+			else if (NULL != strstr(line,"<intermediate>")) {
+				while (NULL == strstr(line,"</intermediate>") && !feof(CSE_file)) {
 
-				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a32, &b32)) {
-					a=(uint8)a32; // this is to avoid overflow (see a32 and b32 declarations)
-					b=(uint8)b32;
-					CSEList.old_size++;
-					CSEList.old=realloc(CSEList.old,CSEList.old_size*sizeof(CipherSuite));
-					(*(CSEList.old+CSEList.old_size-1)).a=a;
-					(*(CSEList.old+CSEList.old_size-1)).b=b;
+					if (2==sscanf(line,"0x%02x,0x%02x%*s", &a32, &b32)) {
+						a=(uint8)a32; // this is to avoid overflow (see a32 and b32 declarations)
+						b=(uint8)b32;
+						CSEList.intermediate_size++;
+						CSEList.intermediate=realloc(CSEList.intermediate,CSEList.intermediate_size*sizeof(CipherSuite));
+						(*(CSEList.intermediate+CSEList.intermediate_size-1)).a=a;
+						(*(CSEList.intermediate+CSEList.intermediate_size-1)).b=b;
+					}
+
+					if ( NULL == fgets(line, sizeof(line), CSE_file) )
+						printf("Error while loading CS eval file.\n");
+						
 				}
-
-				fgets(line, sizeof(line), CSE_file);
-			}
 			
-		}
-		else if (NULL != strstr(line,"<all>")) {
-			while (NULL == strstr(line,"</all>") && !feof(CSE_file)) {
+			}
+			else if (NULL != strstr(line,"<old>")) {
+				while (NULL == strstr(line,"</old>") && !feof(CSE_file)) {
 
-				if (2==sscanf(line,"0x%02x,0x%02x%*s", &a32, &b32)) {
-					a=(uint8)a32; // this is to avoid overflow (see a32 and b32 declarations)
-					b=(uint8)b32;
-					CSEList.all_size++;
-					CSEList.all=realloc(CSEList.all,CSEList.all_size*sizeof(CipherSuite));
-					(*(CSEList.all+CSEList.all_size-1)).a=a;
-					(*(CSEList.all+CSEList.all_size-1)).b=b;
+					if (2==sscanf(line,"0x%02x,0x%02x%*s", &a32, &b32)) {
+						a=(uint8)a32; // this is to avoid overflow (see a32 and b32 declarations)
+						b=(uint8)b32;
+						CSEList.old_size++;
+						CSEList.old=realloc(CSEList.old,CSEList.old_size*sizeof(CipherSuite));
+						(*(CSEList.old+CSEList.old_size-1)).a=a;
+						(*(CSEList.old+CSEList.old_size-1)).b=b;
+					}
+
+					if ( NULL == fgets(line, sizeof(line), CSE_file) )
+						printf("Error while loading CS eval file.\n");
+						
 				}
-
-				fgets(line, sizeof(line), CSE_file);
-			}
 			
+			}
+			else if (NULL != strstr(line,"<all>")) {
+				while (NULL == strstr(line,"</all>") && !feof(CSE_file)) {
+
+					if (2==sscanf(line,"0x%02x,0x%02x%*s", &a32, &b32)) {
+						a=(uint8)a32; // this is to avoid overflow (see a32 and b32 declarations)
+						b=(uint8)b32;
+						CSEList.all_size++;
+						CSEList.all=realloc(CSEList.all,CSEList.all_size*sizeof(CipherSuite));
+						(*(CSEList.all+CSEList.all_size-1)).a=a;
+						(*(CSEList.all+CSEList.all_size-1)).b=b;
+					}
+
+					if ( NULL == fgets(line, sizeof(line), CSE_file) )
+						printf("Error while loading CS eval file.\n");
+				}
+			
+			}
 		}
 
 	}
