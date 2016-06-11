@@ -1,3 +1,7 @@
+2016-06-11  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
+
+	* improved ChaCha20-Poly1305 Cipher Suites support
+
 2015-10-09  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
 
 	* minor bugfix
