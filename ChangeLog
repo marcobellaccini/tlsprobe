@@ -1,5 +1,9 @@
 2016-06-11  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
 
+	* improved Cipher Suites evaluation
+
+2016-06-11  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
+
 	* realigned Cipher Suites evaluations with Mozilla specs
 
 2016-06-11  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
