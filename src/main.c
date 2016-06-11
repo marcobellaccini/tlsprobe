@@ -349,7 +349,7 @@ if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMod
 	
 
 	if (!arguments.quiet)
-		printf("Legend: " KCYN "SAFER " KGRN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "UNKNOWN\n" KRESET);
+		printf("Legend: " KCYN "MODERN " KGRN "INTERMEDIATE " KYEL "OLD " KRED "PROBLEMATIC " KWHT "UNKNOWN\n" KRESET);
 
 }
 
@@ -594,7 +594,7 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 			printf("Maybe you have to set a bigger timeout?\n");
 	} else {
 		if (!arguments.quiet)
-			printf("Legend: " KCYN "SAFER " KGRN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "UNKNOWN\n" KRESET);
+			printf("Legend: " KCYN "MODERN " KGRN "INTERMEDIATE " KYEL "OLD " KRED "PROBLEMATIC " KWHT "UNKNOWN\n" KRESET);
 	}
 	
 }
@@ -749,7 +749,7 @@ else if (!arguments.cipherSuiteMode && !arguments.fullScanMode && arguments.serv
 			
 			if (!arguments.quiet) {
 				printf("Finished, %d Cipher Suites were offered by the client.\n", tlsCH.cipher_suites_length/2);
-				printf("Legend: " KCYN "SAFER " KGRN "SAFE " KYEL "WEAK " KRED "WEAKER " KWHT "SIGNAL/UNKNOWN\n" KRESET);
+				printf("Legend: " KCYN "MODERN " KGRN "INTERMEDIATE " KYEL "OLD " KRED "PROBLEMATIC " KWHT "SIGNAL/UNKNOWN\n" KRESET);
 			}
 			
 			
