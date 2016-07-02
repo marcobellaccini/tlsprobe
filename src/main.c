@@ -78,7 +78,7 @@ int checkSuiteSupport(struct arguments, struct sockaddr_in, 	// check for suppor
 	struct timeval, struct timeval,						 	// last argument (selectedCS) is the position of the suite in CSuitesL array
 	CSuiteDesc*, int);									 		// accepts send and receive timeouts as arguments
 																// returns 0 if suite supported, 1 if unsupported (handshake failure received),
-																// 2 if unsupported (timeout reached), 3 if unsupported (server sent FIN),
+																// 2 if unsupported (server closed connection or timeout reached), 3 if unsupported (server sent decode error),
 																// -2 if could not understand server reply,
 																// -1 if other errors occurred
 																
@@ -305,10 +305,10 @@ if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMod
 				printf("Cipher Suite NOT SUPPORTED (handshake failure received)\n");
 				break;
 			case 2:
-				printf("Cipher Suite NOT SUPPORTED (timeout)\n");
+				printf("Cipher Suite NOT SUPPORTED (server closed TCP connection or timeout)\n");
 				break;
 			case 3:
-				printf("Cipher Suite NOT SUPPORTED (server closed TCP connection)\n");
+				printf("Cipher Suite NOT SUPPORTED (server sent decode error)\n");
 				break;
 			case -2:
 				printf("Could not understand server reply, aborting...\n");
@@ -331,10 +331,10 @@ if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMod
 				printf("Cipher Suite NOT SUPPORTED (handshake failure received)\n");
 				break;
 			case 2:
-				printf("Cipher Suite NOT SUPPORTED (timeout)\n");
+				printf("Cipher Suite NOT SUPPORTED (server closed TCP connection or timeout)\n");
 				break;
 			case 3:
-				printf("Cipher Suite NOT SUPPORTED (server closed TCP connection)\n");
+				printf("Cipher Suite NOT SUPPORTED (server sent decode error)\n");
 				break;
 			case -2:
 				printf("Could not understand server reply, aborting...\n");
@@ -455,6 +455,7 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 				case 1:
 				case 2:
 				case 3:
+				case 4:
 					if (!arguments.quiet)
 						printf("\rTesting suite %d/%d...",selectedCS+1,CSList.nol);
 					break;
@@ -553,6 +554,7 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 					case 1:
 					case 2:
 					case 3:
+					case 4:
 						if (!arguments.quiet)
 							printf("\rTesting suite %d/%d...",selectedCS+1,CSListSSL.nol);
 						break;
@@ -1224,14 +1226,8 @@ int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct
 
 	// get the initial part of the reply
 	ssize_t received=recv(s, rbuf, sizeof(rbuf), 0);
-	if (received<0) {
-		timeOutReached=1; // server did not reply: for IIS Servers this means that the selected cipher suite is not supported by the server
-						  // i.e.: IIS does not send any Handshake Failure message
-	}
 
 	if(rbuf[0]==CT_HANDSHAKE && rbuf[5]==HT_SERVER_HELLO && !timeOutReached && received > 0) { // if server hello received
-
-		//printf("Cipher Suite SUPPORTED\n");
 	
 		send(s, &tlsPTAL, sizeof(tlsPTAL), 0); // send TLS Alert to cancel the handshake
 		shutdown(s,SHUT_WR); // shutdown connection
@@ -1241,32 +1237,23 @@ int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct
 	
 	} else if ((rbuf[0]==CT_ALERT && rbuf[6]==AD_HANDSHAKE_FAILURE && !timeOutReached && received > 0)) { // if handshake failure received (and so the selected cipher suite is not supported by the server)
 	
-		//printf("Cipher Suite NOT SUPPORTED: handshake failure received\n");
-	
 		shutdown(s,SHUT_WR); // shutdown connection
 		
 		return 1; // cipher suite not supported: handshake failure
 	
-	} else if (timeOutReached) { // if timeout was reached - for IIS Servers this means that the selected cipher suite is not supported by the server
-	
-		//printf("Cipher Suite NOT SUPPORTED: timeout\n");
-	
-		send(s, &tlsPTAL, sizeof(tlsPTAL), 0); // send TLS Alert to cancel the handshake
-		shutdown(s,SHUT_WR); // shutdown connection
-		
-		
-		return 2; // cipher suite not supported: timeout
-	
-	} else if ( 0 == received ) { // if connection was closed by the server (i.e. server sent FIN) - this happens with LDAP over TLS if cipher suite was not supported
+	} else if ( received <= 0 ) { // if connection was closed by the server or timeout was reached
 		
 		shutdown(s,SHUT_WR); // shutdown connection
 		
+		return 2; // cipher suite not supported: connection was closed by the server or timeout was reached
 		
-		return 3; // cipher suite not supported: server sent FIN
+	} else if ((rbuf[0]==CT_ALERT && rbuf[6]==AD_DECODE_ERROR && !timeOutReached && received > 0)) { // IIS return this sometimes...
+	
+		shutdown(s,SHUT_WR); // shutdown connection
 		
+		return 3; // cipher suite not supported: decode error
+	
 	} else {
-	
-		//printf("Could not understand server reply\n");
 	
 		send(s, &tlsPTAL, sizeof(tlsPTAL), 0); // send TLS Alert to cancel the handshake
 		shutdown(s,SHUT_WR); // shutdown connection

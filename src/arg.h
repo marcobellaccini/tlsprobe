@@ -37,7 +37,7 @@ static struct argp_option options[] = {
   {"cs-eval-file",   'e', "FILE", 0, "Use Cipher Suites Evaluation file FILE (default is cs_eval.dat located in /usr/local/share/tlsprobe)" },
   {"cipher-suite",   'c', "CIPHER_SUITE_ID", 0, "CLIENT MODE SINGLE CIPHER SUITE PROBE: test if server supports cipher suite CIPHER_SUITE_ID (e.g. TLS_RSA_WITH_AES_128_CBC_SHA)" },
   {"full-scan",   'F', 0, 0, "CLIENT MODE FULL-SCAN: test the server for support of all the cipher suites listed in the IANA Cipher Suites List file" },
-  {"timeout",   't', "TIMEOUT", 0, "Set the timeout at TIMEOUT [ms] for server reply (useful with IIS servers - which don't send handshake failure messages).\n\
+  {"timeout",   't', "TIMEOUT", 0, "Set the timeout at TIMEOUT [ms] for server reply.\n\
   Note: smaller timeouts mean faster scan, but may lead to unreliable results (i.e.: underestimation of the number of supported ciphers).\nDefault timeout is 500ms." },
   {"auto-timeout",   'a', 0, 0, "Autoset timeout by estimating RTT with ping (needs a shell with ping, tail, awk and cut utilities)." },
   {"tls-version",   'R', "VERSION", 0, "Use TLS version VERSION (default is VERSION=1.2)" },
