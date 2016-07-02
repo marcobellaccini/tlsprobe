@@ -455,7 +455,6 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 				case 1:
 				case 2:
 				case 3:
-				case 4:
 					if (!arguments.quiet)
 						printf("\rTesting suite %d/%d...",selectedCS+1,CSList.nol);
 					break;
@@ -554,7 +553,6 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 					case 1:
 					case 2:
 					case 3:
-					case 4:
 						if (!arguments.quiet)
 							printf("\rTesting suite %d/%d...",selectedCS+1,CSListSSL.nol);
 						break;
