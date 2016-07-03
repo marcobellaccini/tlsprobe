@@ -1,3 +1,7 @@
+2016-07-03  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
+
+	* added Signature Algorithms Extension support in order to improve IIS/Schannel compatibility
+	
 2016-07-02  Marco Bellaccini <marco.bellaccini[at!]gmail.com>
 
 	* minor changes

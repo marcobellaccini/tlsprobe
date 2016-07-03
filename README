@@ -16,7 +16,7 @@ It highlights the discovered Cipher Suites with different colors, depending on t
 
 Working at TLS/SSL level, tlsprobe is generic and also supports probing non-https services (you just have to specify the right port for the higher-level protocol with the -p option).
 
-tlsprobe supports SSL 3.0, TLS 1.0, TLS 1.1, TLS 1.2 and TLS 1.3 (draft).
+tlsprobe supports SSL 3.0, TLS 1.0, TLS 1.1 and TLS 1.2.
 
 Here follows some usage examples.
 

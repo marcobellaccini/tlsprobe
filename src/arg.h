@@ -45,9 +45,10 @@ static struct argp_option options[] = {
   {"quiet",   'q', 0, 0, "Be quiet, printing only the results (and a small subset of messages)." },
   {"skip-ssl",   'j', 0, 0, "Skip SSL3 scan when performing a full-scan." },
   {"disable-extensions",   'd', 0, 0, "Disable all TLS Extensions." },
-  {"disable-server-name",   'n', 0, 0, "Avoid using TLS server_name Extension." },
-  {"disable-ec",   'x', 0, 0, "Avoid using TLS elliptic_curves Extension." },
-  {"disable-ec-pf",   'y', 0, 0, "Avoid using TLS elliptic_curves_point_formats Extension." },
+  {"disable-server-name",   'n', 0, 0, "Disable TLS server_name Extension." },
+  {"disable-sigalg",   's', 0, 0, "Disable TLS Signature Algorithms Extension." },
+  {"disable-ec",   'x', 0, 0, "Disable TLS elliptic_curves Extension." },
+  {"disable-ec-pf",   'y', 0, 0, "Disable TLS elliptic_curves_point_formats Extension." },
   {"thread-num",   'w', "TNUM", 0, "Set maximum number of threads to TNUM when performing a full-scan (default is 16)." },
   { 0 }
 };
@@ -56,7 +57,7 @@ static struct argp_option options[] = {
 struct arguments
 {
   char *args[ARGNUM];                // host and port
-  int truetime, port, printMessage, fullScanMode, timeout, autotimeout, cipherSuiteMode, serverMode, quiet, skipSSL, maxThreads, TLSExtensions, TLSSNExtension, TLSECExtension, TLSECPFExtension;
+  int truetime, port, printMessage, fullScanMode, timeout, autotimeout, cipherSuiteMode, serverMode, quiet, skipSSL, maxThreads, TLSExtensions, TLSSNExtension, TLSECExtension, TLSECPFExtension, TLSSAExtension;
   char *CS_file, *CS_eval_file, *CS_file_SSL;
   char *cipherSuite;
   char *tlsVer;
@@ -128,6 +129,9 @@ parse_opt (int key, char *arg, struct argp_state *state)
 	break;
 	case 'y':
       arguments->TLSECPFExtension = 0;
+	break;
+	case 's':
+      arguments->TLSSAExtension = 0;
 	break;
 	case 'w':
       arguments->maxThreads = atoi(arg);

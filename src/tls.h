@@ -40,7 +40,6 @@ ProtocolVersion version30 = { 3, 0 };     // SSL 3.0
 ProtocolVersion version10 = { 3, 1 };     // TLS 1.0
 ProtocolVersion version11 = { 3, 2 };     // TLS 1.1
 ProtocolVersion version12 = { 3, 3 };     // TLS 1.2
-ProtocolVersion version13 = { 3, 4 };     // TLS 1.3 (draft)
 
    
 /* Alert Messages */
@@ -130,11 +129,39 @@ typedef struct {
 
 // TLS Extensions
 #define TLS_EXT_SERVER_NAME 0x0000
+#define TLS_EXT_SIGN_ALG 0x000d
 #define TLS_EXT_EC 0x000a
 #define TLS_EXT_EC_PF 0x000b
 
 // server name
 #define TLS_EXT_SERVER_NAME_HOSTNAME 0x0000
+
+// signature algorithm hashes
+#define TLS_EXT_SIGN_ALG_H_NONE 0
+#define TLS_EXT_SIGN_ALG_H_MD5 1
+#define TLS_EXT_SIGN_ALG_H_SHA1 2
+#define TLS_EXT_SIGN_ALG_H_SHA224 3
+#define TLS_EXT_SIGN_ALG_H_SHA256 4
+#define TLS_EXT_SIGN_ALG_H_SHA384 5
+#define TLS_EXT_SIGN_ALG_H_SHA512 6
+
+// signature algorithms
+#define TLS_EXT_SIGN_ALG_S_ANON 0
+#define TLS_EXT_SIGN_ALG_S_RSA 1
+#define TLS_EXT_SIGN_ALG_S_DSA 2
+#define TLS_EXT_SIGN_ALG_S_ECDSA 3
+
+// signature and hash alg ext
+typedef struct {
+	uint8 hash;
+	uint8 signature;
+} SignatureAndHashAlgorithm;
+
+typedef struct {
+	uint16 length;
+	SignatureAndHashAlgorithm* data;
+} SigExData;
+      
 
 // elliptic curves
 /*

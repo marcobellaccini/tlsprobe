@@ -139,6 +139,7 @@ arguments.TLSExtensions=1;
 arguments.TLSSNExtension=1;
 arguments.TLSECExtension=1;
 arguments.TLSECPFExtension=1;
+arguments.TLSSAExtension=1;
 
 /* Parse our arguments; every option seen by parse_opt will be reflected in arguments. */
 argp_parse (&argp, argc, argv, 0, 0, &arguments);
@@ -158,10 +159,8 @@ if ( 0==strcmp(arguments.tlsVer, "1.0") ) {
 	version=version11;
 } else if ( 0==strcmp(arguments.tlsVer, "1.2") ) {
 	version=version12;
-} else if ( 0==strcmp(arguments.tlsVer, "1.3") ) {
-	version=version13;
 } else {
-	printf("An unknown TLS version was specified, aborting...\nSupported TLS versions are \"1.0\", \"1.1\", \"1.2\" and \"1.3\" (draft)\n");
+	printf("An unknown TLS version was specified, aborting...\nSupported TLS versions are \"1.0\", \"1.1\", \"1.2\"\n");
 	exit(1);
 }
 
@@ -971,6 +970,9 @@ int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct
 	Extension ecPFExt;
 	ECExData ecData;
 	ECPFExData ecPFData;
+	Extension saExt;
+	SignatureAndHashAlgorithm sh[10];
+	SigExData shd;
 	
 	myCH.extensions_length=0;
 	
@@ -987,6 +989,38 @@ int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct
 			snExt.type=TLS_EXT_SERVER_NAME;
 			
 			myCH.extensions_length+=snExt.length+sizeof(snExt.length)+sizeof(snExt.type); // update ClientHello extensions length
+		}
+		/* Signature Algorithm Extension - TLS 1.2 only */
+		if (arguments.TLSSAExtension && version.major == version12.major && version.minor == version12.minor) {
+			noTLSExt++;
+			sh[0].hash=TLS_EXT_SIGN_ALG_H_SHA256;
+			sh[0].signature=TLS_EXT_SIGN_ALG_S_RSA;
+			sh[1].hash=TLS_EXT_SIGN_ALG_H_SHA384;
+			sh[1].signature=TLS_EXT_SIGN_ALG_S_RSA;
+			sh[2].hash=TLS_EXT_SIGN_ALG_H_SHA512;
+			sh[2].signature=TLS_EXT_SIGN_ALG_S_RSA;
+			sh[3].hash=TLS_EXT_SIGN_ALG_H_SHA1;
+			sh[3].signature=TLS_EXT_SIGN_ALG_S_RSA;
+			sh[4].hash=TLS_EXT_SIGN_ALG_H_SHA256;
+			sh[4].signature=TLS_EXT_SIGN_ALG_S_ECDSA;
+			sh[5].hash=TLS_EXT_SIGN_ALG_H_SHA384;
+			sh[5].signature=TLS_EXT_SIGN_ALG_S_ECDSA;
+			sh[6].hash=TLS_EXT_SIGN_ALG_H_SHA512;
+			sh[6].signature=TLS_EXT_SIGN_ALG_S_ECDSA;
+			sh[7].hash=TLS_EXT_SIGN_ALG_H_SHA1;
+			sh[7].signature=TLS_EXT_SIGN_ALG_S_ECDSA;
+			sh[8].hash=TLS_EXT_SIGN_ALG_H_SHA256;
+			sh[8].signature=TLS_EXT_SIGN_ALG_S_DSA;
+			sh[9].hash=TLS_EXT_SIGN_ALG_H_SHA1;
+			sh[9].signature=TLS_EXT_SIGN_ALG_S_DSA;
+			
+			shd.length=sizeof(sh);
+			shd.data=sh;
+			
+			saExt.length=shd.length+2;
+			saExt.type=TLS_EXT_SIGN_ALG;
+			
+			myCH.extensions_length+=saExt.length+sizeof(saExt.length)+sizeof(saExt.type);
 		}
 		/* if selectedCS is ECC-related... */
 		csIsECC=(NULL!=strstr(CSuitesL[selectedCS].name,"ECDH") || NULL!=strstr(CSuitesL[selectedCS].name,"ECDSA"));
@@ -1079,6 +1113,11 @@ int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct
 			sNameData.name_type=htons(sNameData.name_type);
 			sNameData.list_length=htons(sNameData.list_length);
 		}
+		if (arguments.TLSSAExtension  && version.major == version12.major && version.minor == version12.minor) {
+			saExt.type=htons(saExt.type);
+			saExt.length=htons(saExt.length);
+			shd.length=htons(shd.length);
+		}
 		
 		if (csIsECC) {
 			if (arguments.TLSECExtension) {
@@ -1152,6 +1191,18 @@ int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct
 			mloc+=sizeof(sNameData.name_length);
 			memcpy(mloc,sNameData.name,sNameData.name_length); // can do this because sNameData.name_length is uint8 - no endianess problems
 			mloc+=sNameData.name_length;
+		}
+		
+		/* signature algorithm extension */
+		if (arguments.TLSSAExtension  && version.major == version12.major && version.minor == version12.minor) {
+			memcpy(mloc,&(saExt.type),sizeof(saExt.type));
+			mloc+=sizeof(saExt.type);
+			memcpy(mloc,&(saExt.length),sizeof(saExt.length));
+			mloc+=sizeof(saExt.length);
+			memcpy(mloc,&(shd.length),sizeof(shd.length));
+			mloc+=sizeof(shd.length);
+			memcpy(mloc,shd.data,ntohs(shd.length));
+			mloc+=ntohs(shd.length);
 		}
 		
 		/* ecc extensions */
