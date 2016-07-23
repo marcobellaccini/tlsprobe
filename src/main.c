@@ -79,6 +79,7 @@ int checkSuiteSupport(struct arguments, struct sockaddr_in, 	// check for suppor
 	CSuiteDesc*, int);									 		// accepts send and receive timeouts as arguments
 																// returns 0 if suite supported, 1 if unsupported (handshake failure received),
 																// 2 if unsupported (server closed connection or timeout reached), 3 if unsupported (server sent decode error),
+																// 4 if unsupported (protocol version), 5 if unsupported (other alert)
 																// -2 if could not understand server reply,
 																// -1 if other errors occurred
 																
@@ -307,7 +308,13 @@ if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMod
 				printf("Cipher Suite NOT SUPPORTED (server closed TCP connection or timeout)\n");
 				break;
 			case 3:
-				printf("Cipher Suite NOT SUPPORTED (server sent decode error)\n");
+				printf("Cipher Suite NOT SUPPORTED (server sent decode alert)\n");
+				break;
+			case 4:
+				printf("Cipher Suite NOT SUPPORTED (server sent protocol version alert)\n");
+				break;
+			case 5:
+				printf("Cipher Suite NOT SUPPORTED (server sent an alert)\n");
 				break;
 			case -2:
 				printf("Could not understand server reply, aborting...\n");
@@ -333,7 +340,13 @@ if (arguments.cipherSuiteMode && !arguments.fullScanMode && !arguments.serverMod
 				printf("Cipher Suite NOT SUPPORTED (server closed TCP connection or timeout)\n");
 				break;
 			case 3:
-				printf("Cipher Suite NOT SUPPORTED (server sent decode error)\n");
+				printf("Cipher Suite NOT SUPPORTED (server sent decode alert)\n");
+				break;
+			case 4:
+				printf("Cipher Suite NOT SUPPORTED (server sent protocol version alert)\n");
+				break;
+			case 5:
+				printf("Cipher Suite NOT SUPPORTED (server sent an alert)\n");
 				break;
 			case -2:
 				printf("Could not understand server reply, aborting...\n");
@@ -454,6 +467,8 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 				case 1:
 				case 2:
 				case 3:
+				case 4:
+				case 5:
 					if (!arguments.quiet)
 						printf("\rTesting suite %d/%d...",selectedCS+1,CSList.nol);
 					break;
@@ -552,6 +567,8 @@ else if (!arguments.cipherSuiteMode && arguments.fullScanMode && !arguments.serv
 					case 1:
 					case 2:
 					case 3:
+					case 4:
+					case 5:
 						if (!arguments.quiet)
 							printf("\rTesting suite %d/%d...",selectedCS+1,CSListSSL.nol);
 						break;
@@ -846,11 +863,15 @@ int createConnection(struct sockaddr_in sin, struct timeval timeoutS, struct tim
 		return -1;
 	}
 
-	/* connect */
-	if (connect(s, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
-		printf("Unable to connect to the server.\n");
-		close(s);
-		return -1;
+	/* connect - perform 3 connection attempts  before giving up */
+	int conAttempt = 0;
+	while (connect(s, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
+		if ( conAttempt > 1 ) {
+			printf("Unable to connect to the server.\n");
+			close(s);
+			return -1;
+		}
+		conAttempt++;
 	}
 	
 	return s;
@@ -1284,25 +1305,37 @@ int checkSuiteSupport(struct arguments arguments, struct sockaddr_in sin, struct
 		
 		return 0; // cipher suite supported
 	
-	} else if ((rbuf[0]==CT_ALERT && rbuf[6]==AD_HANDSHAKE_FAILURE && !timeOutReached && received > 0)) { // if handshake failure received (and so the selected cipher suite is not supported by the server)
-	
-		shutdown(s,SHUT_WR); // shutdown connection
+	} else if  (rbuf[0]==CT_ALERT && rbuf[5]==AL_FATAL && !timeOutReached && received > 0) { // cipher suite unsupported: fatal alert received
 		
-		return 1; // cipher suite not supported: handshake failure
-	
+		if (rbuf[6]==AD_HANDSHAKE_FAILURE ) {
+			
+			shutdown(s,SHUT_WR); // shutdown connection
+			return 1; // cipher suite not supported: handshake failure
+			
+		} else if (rbuf[6]==AD_DECODE_ERROR) {
+			
+			shutdown(s,SHUT_WR); // shutdown connection
+			return 3; // cipher suite not supported: decode error
+			
+		} else if (rbuf[6]==AD_PROTOCOL_VERSION) {
+			
+			shutdown(s,SHUT_WR); // shutdown connection
+			return 4; // cipher suite not supported: protocol version
+			
+		} else {
+			
+			shutdown(s,SHUT_WR); // shutdown connection
+			return 5; // cipher suite not supported: other alert
+			
+		}
+		
 	} else if ( received <= 0 ) { // if connection was closed by the server or timeout was reached
 		
 		shutdown(s,SHUT_WR); // shutdown connection
 		
 		return 2; // cipher suite not supported: connection was closed by the server or timeout was reached
 		
-	} else if ((rbuf[0]==CT_ALERT && rbuf[6]==AD_DECODE_ERROR && !timeOutReached && received > 0)) { // IIS return this sometimes...
-	
-		shutdown(s,SHUT_WR); // shutdown connection
-		
-		return 3; // cipher suite not supported: decode error
-	
-	} else {
+	}  else {
 	
 		send(s, &tlsPTAL, sizeof(tlsPTAL), 0); // send TLS Alert to cancel the handshake
 		shutdown(s,SHUT_WR); // shutdown connection
