@@ -846,35 +846,39 @@ int createConnection(struct sockaddr_in sin, struct timeval timeoutS, struct tim
 
 	int s; // socket
 	
-	/* active open */
-
-	if ((s = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
-		perror("tlsprobe: socket");
-		return -1;
-	}
-
-	if (setsockopt (s, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeoutR, sizeof(timeoutR)) < 0) { // receive timeout
-		perror("setsockopt failed\n");
-		return -1;
-	}
-
-	if (setsockopt (s, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeoutS, sizeof(timeoutS)) < 0) { // send timeout
-        perror("setsockopt failed\n");
-		return -1;
-	}
-
-	/* connect - perform 3 connection attempts  before giving up */
 	int conAttempt = 0;
-	while (connect(s, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
-		if ( conAttempt > 1 ) {
-			printf("Unable to connect to the server.\n");
-			close(s);
+	
+	/* perform 3 connection attempts before giving up */
+	
+	while (conAttempt < 3) {
+		/* active open */
+	
+		if ((s = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
+			perror("tlsprobe: socket");
 			return -1;
 		}
-		conAttempt++;
+	
+		if (setsockopt (s, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeoutR, sizeof(timeoutR)) < 0) { // receive timeout
+			perror("setsockopt failed\n");
+			return -1;
+		}
+	
+		if (setsockopt (s, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeoutS, sizeof(timeoutS)) < 0) { // send timeout
+			perror("setsockopt failed\n");
+			return -1;
+		}
+		
+		if (connect(s, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
+			close(s);
+			conAttempt++;
+		} else {
+			return s;
+		}
 	}
 	
-	return s;
+	printf("Unable to connect to the server.\n");
+	close(s);
+	return -1;
 
 }
 
