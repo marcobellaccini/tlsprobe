@@ -3,8 +3,7 @@ tlsprobe - a TLS/SSL testing utility (by Marco Bellaccini - marco.bellaccini[at!
 tlsprobe is a simple program that tests a server for TLS/SSL Cipher Suites support (client mode) or, listening for incoming TLS/SSL connections, discovers Cipher Suites offered by a client (server mode).
 tlsprobe is Free Software, released under the Apache License, Version 2.0.
 
-Website: http://marco-bellaccini.bitbucket.org/tlsprobe/
-Bitbucket project page: https://bitbucket.org/marco-bellaccini/tlsprobe
+GitHub project page: https://github.com/marcobellaccini/tlsprobe
 
 In client mode, tlsprobe just sends ClientHello messages, and, by looking at server's reply (if any), determines whether the selected Cipher Suite(s) is supported or not.
 tlsprobe builds TLS/SSL messages in a "byte-by-byte" fashion and so does not need any external library (i.e.: no OpenSSL, no GnuTLS, no libNSS).
@@ -17,6 +16,8 @@ It highlights the discovered Cipher Suites with different colors, depending on t
 Working at TLS/SSL level, tlsprobe is generic and also supports probing non-https services (you just have to specify the right port for the higher-level protocol with the -p option).
 
 tlsprobe supports SSL 3.0, TLS 1.0, TLS 1.1 and TLS 1.2.
+
+Note for Windows users: yeah, this tool can be run on Windows 10 through Windows Subsystem for Linux. 
 
 Here follows some usage examples.
 
